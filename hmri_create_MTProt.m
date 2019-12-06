@@ -1029,12 +1029,15 @@ function [x] = coreg_mt(P_ref, P_src)
 
 for src_nr = 1:size(P_src,1)
     VG = spm_vol(P_ref);
-    VF = spm_vol(P_src(src_nr,:));
-    coregflags.sep = [4 2];
-    x = spm_coreg(VG,VF, coregflags);
-    M  = inv(spm_matrix(x));
-    MM = spm_get_space(deblank(VF.fname));
-    spm_get_space(deblank(deblank(VF.fname)), M*MM); %#ok<*MINV>
+    for fwhm=[21 14 7]
+        VF = spm_vol(P_src(src_nr,:));
+        coregflags.sep = [4 2];
+        coregflags.fwhm = [fwhm fwhm];
+        x = spm_coreg(VG,VF, coregflags);
+        M  = inv(spm_matrix(x));
+        MM = spm_get_space(deblank(VF.fname));
+        spm_get_space(deblank(deblank(VF.fname)), M*MM); %#ok<*MINV>
+    end
 end
 end
 
