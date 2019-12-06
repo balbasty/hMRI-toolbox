@@ -4,6 +4,7 @@ function jobsubj = hmri_create_RFsens(jobsubj)
 % Wellcome Trust Centre for Neuroimaging (WTCN), London, UK.
 % daniel.papp.13@ucl.ac.uk
 % Adapted by Dr. Tobias Leutritz
+% Adapted by Yael Balbastre (handling of pre-computed maps)
 %
 % Description:
 % This script removes the coil sensitivty driven signal
@@ -12,8 +13,9 @@ function jobsubj = hmri_create_RFsens(jobsubj)
 % Also the case of only one acquistion per session is handled accordingly.
 %
 % Outputs:
-% corrected echoes, called sMT_manualnorm_echo-1, and the appropriate
-% three "sensitivty maps", called MT_32ch_over_BC, or appropriate PD/T1
+% corrected echoes, suffixed by '_RFSC', and the appropriate
+% three "sensitivty maps", called sensMap_HC_over_BC_division_<MT|T1|PD>
+% (or, in the precomputed case, original filenames prefixed by 'r')
 %
 % Reference:
 % D. Papp et al.: "Correction of Inter-Scan Motion Artifacts in
@@ -48,18 +50,25 @@ for ccon = 1:rfsens_params.ncon
     %==========================================================================
     % Coregistering the images: each sensmap onto the corresponding structural
     %==========================================================================
-    coregmaps = coreg_sens_to_struct_images(structurals(1,:), sensmaps, calcpath, rfsens_params.input(ccon).tag);
+    coregmaps = coreg_sens_to_struct_images(structurals(1,:), sensmaps, calcpath, ...
+        rfsens_params.input(ccon).tag, rfsens_params.precomputed);
     
-    %==========================================================================
-    % Smoothing the coregistered images
-    %==========================================================================
-    smoothedmaps = smooth_sens_images(coregmaps, smooth_kernel);
-    
-    %==========================================================================
-    % Calculate quantitative RF sensitivity maps (HC/BC division)
-    %==========================================================================
-    qsensmap = spm_imcalc(smoothedmaps, fullfile(calcpath, sprintf('sensMap_HC_over_BC_division_%s.nii',rfsens_params.input(ccon).tag)), 'i1./i2');
-    qsensmap = qsensmap.fname;
+    if rfsens_params.precomputed
+        qsensmap = coregmaps{1};
+        qsensmap = split(qsensmap,',');
+        qsensmap = qsensmap{1};
+    else
+        %==========================================================================
+        % Smoothing the coregistered images
+        %==========================================================================
+        smoothedmaps = smooth_sens_images(coregmaps, smooth_kernel);
+
+        %==========================================================================
+        % Calculate quantitative RF sensitivity maps (HC/BC division)
+        %==========================================================================
+        qsensmap = spm_imcalc(smoothedmaps, fullfile(calcpath, sprintf('sensMap_HC_over_BC_division_%s.nii',rfsens_params.input(ccon).tag)), 'i1./i2');
+        qsensmap = qsensmap.fname;
+    end
     % set metadata
     input_files = sensmaps;
     Output_hdr = init_rfsens_output_metadata(input_files, rfsens_params);
@@ -127,6 +136,11 @@ rfsens_params.smooth_kernel = hmri_get_defaults('RFsens.smooth_kernel');
 [v,r] = spm('Ver');
 rfsens_params.SPMver = sprintf('%s (%s)', v, r);
 
+% Precomputed maps?
+rfsens_params.precomputed = ...
+       (isfield(jobsubj.sensitivity, 'RF_once') && jobsubj.sensitivity.RF_once.sens_precomp) ...
+    || (isfield(jobsubj.sensitivity, 'RF_per_contrast') && jobsubj.sensitivity.RF_per_contrast.sens_precomp);
+
 % Input structurals: determine which contrasts are available
 ccon = 0;
 % 1) try MTw contrast:
@@ -167,8 +181,8 @@ clear tmpfnam;
 % PD, T1). We first copy them to the calcpath directory to avoid working on
 % raw data:
 if isfield(jobsubj.sensitivity,'RF_once')
-    for i=1:length(jobsubj.sensitivity.RF_once)
-        tmprawfnam = spm_file(jobsubj.sensitivity.RF_once{i},'number','');
+    for i=1:length(jobsubj.sensitivity.RF_once.raw_sens)
+        tmprawfnam = spm_file(jobsubj.sensitivity.RF_once.raw_sens{i},'number','');
         tmpfnam{i} = fullfile(rfsens_params.calcpath,spm_file(tmprawfnam,'filename'));
         copyfile(tmprawfnam, tmpfnam{i});
         try copyfile([spm_str_manip(tmprawfnam,'r') '.json'],[spm_str_manip(tmpfnam{i},'r') '.json']); end
@@ -241,22 +255,40 @@ end
 % the contrast (MT/PD/T1) is added to avoid overwriting data when the same
 % sensitivity map is used for each contrast.
 %=========================================================================%
-function coregsensfnam = coreg_sens_to_struct_images(strucfnam, sensfnam, calcpath, tag)
+function coregsensfnam = coreg_sens_to_struct_images(strucfnam, sensfnam, calcpath, tag, precomp)
 clear matlabbatch
-for i = 1:size(sensfnam,1)
-    matlabbatch{1}.spm.spatial.coreg.estwrite.ref = {deblank(strucfnam(1,:))};
-    matlabbatch{1}.spm.spatial.coreg.estwrite.source = {deblank(sensfnam(i,:))};
-    matlabbatch{1}.spm.spatial.coreg.estwrite.eoptions.cost_fun = 'nmi';
-    matlabbatch{1}.spm.spatial.coreg.estwrite.roptions.prefix = sprintf('r%s_',tag);
-    matlabbatch{1}.spm.spatial.coreg.estwrite.other = {''};
-    matlabbatch{1}.spm.spatial.coreg.estwrite.eoptions.sep = [2 1];
-    matlabbatch{1}.spm.spatial.coreg.estwrite.eoptions.tol = [0.02 0.02 0.02 0.001 0.001 0.001 0.01 0.01 0.01 0.001 0.001 0.001];
-    matlabbatch{1}.spm.spatial.coreg.estwrite.eoptions.fwhm = [7 7];
-    matlabbatch{1}.spm.spatial.coreg.estwrite.roptions.interp = 4;
-    matlabbatch{1}.spm.spatial.coreg.estwrite.roptions.wrap = [0 0 0];
-    matlabbatch{1}.spm.spatial.coreg.estwrite.roptions.mask = 0;
-    output_list = spm_jobman('run',matlabbatch);
-    coregsensfnam{i} = fullfile(calcpath, spm_file(output_list{1}.rfiles{1},'filename')); %#ok<AGROW>
+if precomp
+    for i = 1:2:size(sensfnam,1)
+        matlabbatch{1}.spm.spatial.coreg.estwrite.ref = {deblank(strucfnam(1,:))};
+        matlabbatch{1}.spm.spatial.coreg.estwrite.source = {deblank(sensfnam(2*i,:))};  % body/mean image
+        matlabbatch{1}.spm.spatial.coreg.estwrite.other = {deblank(sensfnam(2*i-1,:))}; % sensitivity map
+        matlabbatch{1}.spm.spatial.coreg.estwrite.eoptions.cost_fun = 'nmi';
+        matlabbatch{1}.spm.spatial.coreg.estwrite.roptions.prefix = sprintf('r%s_',tag);
+        matlabbatch{1}.spm.spatial.coreg.estwrite.eoptions.sep = [2 1];
+        matlabbatch{1}.spm.spatial.coreg.estwrite.eoptions.tol = [0.02 0.02 0.02 0.001 0.001 0.001 0.01 0.01 0.01 0.001 0.001 0.001];
+        matlabbatch{1}.spm.spatial.coreg.estwrite.eoptions.fwhm = [7 7];
+        matlabbatch{1}.spm.spatial.coreg.estwrite.roptions.interp = 4;
+        matlabbatch{1}.spm.spatial.coreg.estwrite.roptions.wrap = [0 0 0];
+        matlabbatch{1}.spm.spatial.coreg.estwrite.roptions.mask = 0;
+        output_list = spm_jobman('run',matlabbatch);
+        coregsensfnam{ceil(i/2)}   = fullfile(calcpath, spm_file(output_list{1}.rfiles{2},'filename')); % sensitivity map 
+        coregsensfnam{ceil(i/2)+1} = fullfile(calcpath, spm_file(output_list{1}.rfiles{1},'filename')); % body/mean image
+    end
+else
+    for i = 1:size(sensfnam,1)
+        matlabbatch{1}.spm.spatial.coreg.estwrite.ref = {deblank(strucfnam(1,:))};
+        matlabbatch{1}.spm.spatial.coreg.estwrite.source = {deblank(sensfnam(i,:))}; 
+        matlabbatch{1}.spm.spatial.coreg.estwrite.eoptions.cost_fun = 'nmi';
+        matlabbatch{1}.spm.spatial.coreg.estwrite.roptions.prefix = sprintf('r%s_',tag);
+        matlabbatch{1}.spm.spatial.coreg.estwrite.eoptions.sep = [2 1];
+        matlabbatch{1}.spm.spatial.coreg.estwrite.eoptions.tol = [0.02 0.02 0.02 0.001 0.001 0.001 0.01 0.01 0.01 0.001 0.001 0.001];
+        matlabbatch{1}.spm.spatial.coreg.estwrite.eoptions.fwhm = [7 7];
+        matlabbatch{1}.spm.spatial.coreg.estwrite.roptions.interp = 4;
+        matlabbatch{1}.spm.spatial.coreg.estwrite.roptions.wrap = [0 0 0];
+        matlabbatch{1}.spm.spatial.coreg.estwrite.roptions.mask = 0;
+        output_list = spm_jobman('run',matlabbatch);
+        coregsensfnam{i}   = fullfile(calcpath, spm_file(output_list{1}.rfiles{1},'filename'));
+    end
 end
 coregsensfnam = coregsensfnam'; % must be a nx1 cellstr
 clear matlabbatch

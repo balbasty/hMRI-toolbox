@@ -73,7 +73,7 @@ raws            = cfg_branch;
 raws.tag        = 'raw_mpm';
 raws.name       = 'Multiparameter input images';
 raws.help       = {'Input all the MT/PD/T1-weighted images.'};
-raws.val        = {raws1 raws2 raws3};
+raws.val        = {raws1 raws2 raws3};r
 
 
 %--------------------------------------------------------------------------
@@ -321,6 +321,19 @@ sraws3T1.ufilter  = '.*';
 sraws3T1.num       = [0 2];
 sraws3T1.val       = {''};
 % ---------------------------------------------------------------------
+% Computed maps
+% ---------------------------------------------------------------------
+sprecomp         = cfg_menu;
+sprecomp.tag     = 'sens_precomp';
+sprecomp.name    = 'Compute RF sensitivity maps';
+sprecomp.help    = {'Specify if RF sensitivity maps must be computed or have been pre-calculated. '
+    'You can select either:'
+    '- Pre-calculated: Maps have been pre-computed (you should provide the map and, optionally, a body coil image for co-registration),'
+    '- Compute: Maps will be computed (you should provide the head and body coils, in that order).'};
+sprecomp.labels = {'Pre-calculated' 'Compute'};
+sprecomp.values = {true false};
+sprecomp.val = {false};
+% ---------------------------------------------------------------------
 % xNULL No RF sensitivity bias correction applied at all
 % ---------------------------------------------------------------------
 xNULL         = cfg_entry;
@@ -344,16 +357,23 @@ x0.strtype = 's';
 x0.num     = [1 Inf];
 x0.val     = {'-'};
 % ---------------------------------------------------------------------
+% Input images for RF sensitivity - RF sensitivity maps for all images
+% ---------------------------------------------------------------------
+sraws1          = cfg_files;
+sraws1.tag      = 'raw_sens';
+sraws1.name     = 'RF sensitivity maps';
+sraws1.help     = {'Select low resolution RF sensitivity maps acquired with the head and body coils respectively, in that order.'};
+sraws1.filter   = 'image';
+sraws1.ufilter  = '.*';
+sraws1.num      = [2 2];
+% ---------------------------------------------------------------------
 % x1 Single RF sensitivity maps acquired for all contrasts
 % ---------------------------------------------------------------------
-x1          = cfg_files;
-x1.tag      = 'RF_once';
-x1.name     = 'Single';
-x1.help     = {'Single set of RF sensitivity maps acquired for all contrasts.', ...
-    'Select low resolution RF sensitivity maps acquired with the head and body coils respectively, in that order.'};
-x1.filter   = 'image';
-x1.ufilter  = '.*';
-x1.num      = [2 2];
+x1         = cfg_branch;
+x1.tag     = 'RF_once';
+x1.name    = 'Single';
+x1.help    = {'Single set of RF sensitivity maps acquired for all contrasts.'};
+x1.val     = {sraws1 sprecomp};
 % ---------------------------------------------------------------------
 % x3 RF sensitivity acquired for each modality 
 % ---------------------------------------------------------------------
@@ -362,7 +382,7 @@ x3.tag     = 'RF_per_contrast';
 x3.name    = 'Per contrast';
 x3.help    = {['One set of RF sensitivity maps is acquired for each contrast ' ...
     'i.e. for each of the PD-, T1- and MT-weighted multi-echo FLASH acquisitions.']};
-x3.val     = {sraws3MT sraws3PD sraws3T1};
+x3.val     = {sraws3MT sraws3PD sraws3T1 sprecomp};
 % ---------------------------------------------------------------------
 % sensitivity Sensitivity choice
 % ---------------------------------------------------------------------
