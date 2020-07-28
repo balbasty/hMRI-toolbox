@@ -54,7 +54,7 @@ hmri_def.scanner = 'scanner name' ; % e.g. 'prisma', 'allegra', 'terra', 'achiev
 % be convenient if one desires to have a closer look at intermediate
 % processing steps. Otherwise "cleanup = true" is recommended for saving
 % disk space.
-hmri_def.cleanup = true;
+hmri_def.cleanup = false;
 % settings for JSON metadata: by default, separate JSON files are used to
 % store the metadata (information on data acquisition and processing,
 % tracking of input and output files), as JSON-formatted, tab-indented
@@ -205,6 +205,8 @@ hmri_def.PDproc.T2scorr = 1; % to correct A map for T2*-weighting bias
 % ADVANCED USER ONLY.
 %--------------------------------------------------------------------------
 hmri_def.RFsens.smooth_kernel = 12;
+hmri_def.RFsens.reg.array     = 1E7;
+hmri_def.RFsens.reg.body      = 1E9;
 
 %--------------------------------------------------------------------------
 % quantitative maps: quality evaluation and realignment to MNI

@@ -1,0 +1,3 @@
+[submodule "multi-bias"]
+	path = multi-bias
+	url = https://github.com/balbasty/multi-bias

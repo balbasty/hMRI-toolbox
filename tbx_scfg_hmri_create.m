@@ -73,8 +73,22 @@ raws            = cfg_branch;
 raws.tag        = 'raw_mpm';
 raws.name       = 'Multiparameter input images';
 raws.help       = {'Input all the MT/PD/T1-weighted images.'};
-raws.val        = {raws1 raws2 raws3};r
+raws.val        = {raws1 raws2 raws3};
 
+% ---------------------------------------------------------------------
+% Input reference images
+% ---------------------------------------------------------------------
+ref           = cfg_files;
+ref.tag       = 'ref';
+ref.name      = 'Reference images';
+ref.help      = {['Input reference image that define the reconstruction space. ' ...
+                  'If a series of echoes is provided, their average will be ' ...
+                  'used as the reference image. If empty, the first few ' ...
+                  'PDw echoes will be used.']};
+ref.filter    = 'image';
+ref.ufilter   = '.*';
+ref.num       = [0 Inf];
+ref.val       = {''};
 
 %--------------------------------------------------------------------------
 % B1 acq/proc defaults file
@@ -187,73 +201,123 @@ scafac.strtype = 'r';
 scafac.num     = [1 1];
 scafac.val     = {1};
 
-b1_input_preproc           = cfg_branch;
-b1_input_preproc.tag       = 'pre_processed_B1';
-b1_input_preproc.name      = 'pre-processed B1';
-b1_input_preproc.help      = {'Input pre-calculated B1 bias map.'
-    ['Please select one unprocessed magnitude image ' ...
-    'from the B1map data set (for coregistration with the multiparameter maps) ' ...
-    'and the preprocessed B1map, in that order.']
-    ['The B1 map is expected to be in ' ...
-    'percent units (p.u.) of the nominal flip angle. If this is not the case, ' ...
-    'a scaling factor can be introduced (see Scaling factor description for more details).']};
-b1_input_preproc.val       = {b1raw scafac};
-
+function x = b1_input_preproc(tag, name, varargin)
+    if nargin < 2, name = tag; end
+    x           = cfg_branch;
+    x.tag       = tag;
+    x.name      = name;
+    x.help      = {'Input pre-calculated B1 bias map.'
+        ['Please select one unprocessed magnitude image ' ...
+        'from the B1map data set (for coregistration with the multiparameter maps) ' ...
+        'and the preprocessed B1map, in that order.']
+        ['The B1 map is expected to be in ' ...
+        'percent units (p.u.) of the nominal flip angle. If this is not the case, ' ...
+        'a scaling factor can be introduced (see Scaling factor description for more details).']};
+    x.val       = {b1raw scafac};
+end
 
 % ---------------------------------------------------------------------
 % RF_MAP B1 protocol
 % ---------------------------------------------------------------------
-b1_input_rfmap           = cfg_branch;
-b1_input_rfmap.tag       = 'rf_map';
-b1_input_rfmap.name      = 'rf_map';
-b1_input_rfmap.help      = {'Input B1 images for rf_map B1 map protocol.' ...
-    'As B1 input, please select the pair of anatomical and precalculated B1 map, in that order.'};
-b1_input_rfmap.val       = {b1raw};
-
+function x = b1_input_rfmap(tag, name, varargin)
+    if nargin < 2, name = tag; end
+    x           = cfg_branch;
+    x.tag       = tag;
+    x.name      = name;
+    x.help      = {'Input B1 images for rf_map B1 map protocol.' ...
+        'As B1 input, please select the pair of anatomical and precalculated B1 map, in that order.'};
+    x.val       = {b1raw};
+end
 
 % ---------------------------------------------------------------------
 % TFL_B1_MAP B1 protocol
 % ---------------------------------------------------------------------
-b1_input_tfl           = cfg_branch;
-b1_input_tfl.tag       = 'tfl_b1_map';
-b1_input_tfl.name      = 'tfl_b1_map';
-b1_input_tfl.help      = {'Input B1 images for TFL B1 map protocol.' ...
-    'As B1 input, please select the pair of anatomical and precalculated B1 map, in that order.'};
-b1_input_tfl.val       = {b1raw};
-
+function x = b1_input_tfl(tag, name, varargin)
+    if nargin < 2, name = tag; end
+    x           = cfg_branch;
+    x.tag       = tag;
+    x.name      = name;
+    x.help      = {'Input B1 images for TFL B1 map protocol.' ...
+        'As B1 input, please select the pair of anatomical and precalculated B1 map, in that order.'};
+    x.val       = {b1raw};
+end
 
 % ---------------------------------------------------------------------
 % i3D_AFI B1 protocol
 % ---------------------------------------------------------------------
-b1_input_3DAFI           = cfg_branch;
-b1_input_3DAFI.tag       = 'i3D_AFI';
-b1_input_3DAFI.name      = '3D AFI';
-b1_input_3DAFI.help      = {'3D Actual Flip Angle Imaging (AFI) protocol.', ...
-    'As B1 input, please select a TR2/TR1 pair of magnitude images.', ...
-    ['Regarding processing parameters, you can either stick with metadata and standard ' ...
-    'defaults parameters (recommended) or select your own [hmri_b1_local_defaults_*.m] customised defaults file ' ...
-    '(fallback for situations where no metadata are available).']};
-b1_input_3DAFI.val       = {b1raw b1parameters};
-
+function x = b1_input_3DAFI(tag, name, param)
+    if nargin < 2, name = tag; end
+    if nargin < 3 || isempty(param), param = {}; 
+    else,                            param = {param}; end
+    x           = cfg_branch;
+    x.tag       = tag;
+    x.name      = name;
+    x.help      = {'3D Actual Flip Angle Imaging (AFI) protocol.', ...
+        'As B1 input, please select a TR2/TR1 pair of magnitude images.', ...
+        ['Regarding processing parameters, you can either stick with metadata and standard ' ...
+        'defaults parameters (recommended) or select your own [hmri_b1_local_defaults_*.m] customised defaults file ' ...
+        '(fallback for situations where no metadata are available).']};
+    x.val       = [{b1raw} param];
+end
 
 % ---------------------------------------------------------------------
 % i3D_EPI B1 protocol
 % ---------------------------------------------------------------------
-b1_input_3DEPI           = cfg_branch;
-b1_input_3DEPI.tag       = 'i3D_EPI';
-b1_input_3DEPI.name      = '3D EPI';
-b1_input_3DEPI.help      = {'Input B0/B1 data for 3D EPI protocol'
-    'As B1 input, please select all pairs of SE/STE 3D EPI images.'
-    ['For this EPI protocol, it is recommended to acquire B0 field map data ' ...
-    'for distortion correction. If no B0 map available, the script will proceed ' ...
-    'with distorted images.']
-    ['Please enter the two magnitude images and the presubtracted phase image ' ...
-    'from the B0 mapping acquisition, in that order.']
-    ['Regarding processing parameters, you can either stick with metadata and standard ' ...
-    'defaults parameters (recommended) or select your own [hmri_b1_local_defaults_*.m] customised defaults file ' ...
-    '(fallback for situations where no metadata are available).']};
-b1_input_3DEPI.val       = {b1raw b0raw b1parameters};
+function x = b1_input_3DEPI(tag, name, param)
+    if nargin < 2, name = tag; end
+    if nargin < 3 || isempty(param), param = {}; 
+    else,                            param = {param}; end
+    x           = cfg_branch;
+    x.tag       = tag;
+    x.name      = name;
+    x.help      = {'Input B0/B1 data for 3D EPI protocol'
+        'As B1 input, please select all pairs of SE/STE 3D EPI images.'
+        ['For this EPI protocol, it is recommended to acquire B0 field map data ' ...
+        'for distortion correction. If no B0 map available, the script will proceed ' ...
+        'with distorted images.']
+        ['Please enter the two magnitude images and the presubtracted phase image ' ...
+        'from the B0 mapping acquisition, in that order.']
+        ['Regarding processing parameters, you can either stick with metadata and standard ' ...
+        'defaults parameters (recommended) or select your own [hmri_b1_local_defaults_*.m] customised defaults file ' ...
+        '(fallback for situations where no metadata are available).']};
+    x.val       = [{b1raw b0raw} param];
+end
 
+% ---------------------------------------------------------------------
+% Single/Multi B1
+% ---------------------------------------------------------------------
+function x = b1_single(input, varargin)
+    x = input('B1_once', 'Single', varargin{:});
+end
+function x = b1_multi(input, varargin)
+    input_MT  = input('MT');
+    input_PD  = input('PD');
+    input_T1  = input('T1');
+    x         = cfg_branch;
+    x.tag     = 'B1_per_contrast';
+    x.name    = 'Per contrast';
+    x.help    = {['One set of RF sensitivity maps is acquired for each contrast ' ...
+        'i.e. for each of the PD-, T1- and MT-weighted multi-echo FLASH acquisitions.']};
+    x.val     = {input_MT input_PD input_T1 param};
+end
+function x = b1_choice(tag, name, input, varargin)
+    single    = b1_single(input, varargin{:});
+    multi     = b1_multi(input, varargin{:});
+    x         = cfg_choice;
+    x.tag     = tag;
+    x.name    = name;
+    x.help    = {'Specify if one or mutiple sets of B1 maps were acquired. '
+        'You can select either:'
+        '- Single: based on a single set of B1 maps for all contrasts,'
+        '- Per contrast: based on one set of B1 maps acquired for each contrast.'};
+    x.values  = {single multi};hmri_create_MTProt.m
+    x.val     = {single};
+end
+b1_choice_3DEPI   = b1_choice('i3D_EPI',          '3D EPI',           @b1_input_3DEPI, b1parameters);
+b1_choice_3DAFI   = b1_choice('i3D_AFI',          '3D AFI',           @b1_input_3DAFI, b1parameters);
+b1_choice_tfl     = b1_choice('tfl_b1_map',       'tfl_b1_map',       @b1_input_tfl);
+b1_choice_rfmap   = b1_choice('rf_map',           'rf_map',           @b1_input_rfmap);
+b1_choice_preproc = b1_choice('pre_processed_B1', 'pre-processed_B1', @b1_input_preproc);
 
 % ---------------------------------------------------------------------
 % menu type_b1
@@ -281,8 +345,8 @@ b1_type.help    = {'Choose the methods for B1 bias correction.'
     'using the approach described in [Weiskopf et al., NeuroImage 2011; 54:2116-2124]. ' ...
     'WARNING: the correction only applies to R1 maps.']
     }; %#ok<*NBRAK>
-b1_type.values  = {b1_input_3DEPI b1_input_3DAFI b1_input_tfl b1_input_rfmap b1_input_preproc b1_input_UNICORT b1_input_noB1};
-b1_type.val     = {b1_input_3DEPI};
+b1_type.values  = {b1_choice_3DEPI b1_choice_3DAFI b1_choice_tfl b1_choice_rfmap b1_choice_preproc b1_input_UNICORT b1_input_noB1};
+b1_type.val     = {b1_choice_3DEPI};
 
 % ---------------------------------------------------------------------
 % Input images for RF sensitivity - RF sensitivity maps for MTw images
@@ -323,16 +387,17 @@ sraws3T1.val       = {''};
 % ---------------------------------------------------------------------
 % Computed maps
 % ---------------------------------------------------------------------
-sprecomp         = cfg_menu;
-sprecomp.tag     = 'sens_precomp';
-sprecomp.name    = 'Compute RF sensitivity maps';
-sprecomp.help    = {'Specify if RF sensitivity maps must be computed or have been pre-calculated. '
+smode         = cfg_menu;
+smode.tag     = 'mode';
+smode.name    = 'Method';
+smode.help    = {'Specify how to compute RF sensitivity maps. '
     'You can select either:'
-    '- Pre-calculated: Maps have been pre-computed (you should provide the map and, optionally, a body coil image for co-registration),'
-    '- Compute: Maps will be computed (you should provide the head and body coils, in that order).'};
-sprecomp.labels = {'Pre-calculated' 'Compute'};
-sprecomp.values = {true false};
-sprecomp.val = {false};
+    '- Classic: Maps will be computed with respect to a body coil image (you should provide the head and body coils, in that order),'
+    '- Barycentric: Maps will be computed with respect to a mean space (you should provide the head and (optionnaly) body coils, in that order),'
+    '- Pre-calculated: Maps have been pre-computed (you should provide the map and (optionally) a structural image for co-registration).'};
+smode.labels = {'Classic' 'Barycentric' 'Pre-calculated'};
+smode.values = {1 2 0}; 
+smode.val    = {1};
 % ---------------------------------------------------------------------
 % xNULL No RF sensitivity bias correction applied at all
 % ---------------------------------------------------------------------
@@ -373,7 +438,7 @@ x1         = cfg_branch;
 x1.tag     = 'RF_once';
 x1.name    = 'Single';
 x1.help    = {'Single set of RF sensitivity maps acquired for all contrasts.'};
-x1.val     = {sraws1 sprecomp};
+x1.val     = {smode sraws1};
 % ---------------------------------------------------------------------
 % x3 RF sensitivity acquired for each modality 
 % ---------------------------------------------------------------------
@@ -382,7 +447,7 @@ x3.tag     = 'RF_per_contrast';
 x3.name    = 'Per contrast';
 x3.help    = {['One set of RF sensitivity maps is acquired for each contrast ' ...
     'i.e. for each of the PD-, T1- and MT-weighted multi-echo FLASH acquisitions.']};
-x3.val     = {sraws3MT sraws3PD sraws3T1 sprecomp};
+x3.val     = {smode sraws3MT sraws3PD sraws3T1};
 % ---------------------------------------------------------------------
 % sensitivity Sensitivity choice
 % ---------------------------------------------------------------------
@@ -437,7 +502,7 @@ subj            = cfg_branch;
 subj.tag        = 'subj';
 subj.name       = 'Subject';
 subj.help       = {'Specify a subject for maps calculation.'};
-subj.val        = {output sensitivity b1_type raws popup};
+subj.val        = {output sensitivity b1_type raws ref popup};
 
 % ---------------------------------------------------------------------
 % data Data

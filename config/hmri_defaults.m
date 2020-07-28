@@ -52,7 +52,7 @@ hmri_def.local_defaults = {fullfile(fileparts(mfilename('fullpath')),'local','hm
 % be convenient if one desires to have a closer look at intermediate
 % processing steps. Otherwise "cleanup = true" is recommended for saving
 % disk space.
-hmri_def.cleanup = true;
+hmri_def.cleanup = false;
 % settings for JSON metadata: by default, separate JSON files are used to
 % store the metadata (information on data acquisition and processing,
 % tracking of input and output files), as JSON-formatted, tab-indented
@@ -203,6 +203,8 @@ hmri_def.PDproc.T2scorr = 1; % to correct A map for T2*-weighting bias
 % ADVANCED USER ONLY.
 %--------------------------------------------------------------------------
 hmri_def.RFsens.smooth_kernel = 12;
+hmri_def.RFsens.reg.array     = 1E7;
+hmri_def.RFsens.reg.body      = 1E9;
 
 %--------------------------------------------------------------------------
 % quantitative maps: quality evaluation and realignment to MNI
@@ -335,7 +337,7 @@ hmri_def.MPMacq_set.vals{7}  = [25 25 6 21];
 % When enabling the imperfect spoiling correction, make sure the
 % coefficients retrieved in the list below are definitely calculated for
 % the protocol used!
-hmri_def.imperfectSpoilCorr.enabled = false;
+hmri_def.imperfectSpoilCorr.enabled = true;
 
 % 1) classic FIL protocol (Weiskopf et al., Neuroimage 2011):
 hmri_def.imperfectSpoilCorr.ClassicFIL.tag = 'Classic FIL protocol';

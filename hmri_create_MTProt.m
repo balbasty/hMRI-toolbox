@@ -135,12 +135,17 @@ supplpath = mpm_params.supplpath;
 % contrasts AND under TE_limit (+1) - see get_mpm_params)
 avg_nr = mpm_params.nr_echoes4avg; 
 
-% load PDw images
-% PDw images are the reference space for all results. Therefore, the matrix
-% dimension defined below (dm) is used across the whole script. It must not
-% been redefined.
+% load reference image
+% Reference images define reference space for all results. Therefore, the 
+% matrix dimension defined below (dm) is used across the whole script. It 
+% must not be redefined.
+if ~isempty(mpm_params.ref.fnam)
+    V_ref = spm_vol(mpm_params.ref.fnam);
+else
+    V_ref = spm_vol(mpm_params.input(PDwidx).fnam);
+end
+dm = V_ref(1).dim;
 V_pdw = spm_vol(mpm_params.input(PDwidx).fnam);
-dm = V_pdw(1).dim;
 
 %% =======================================================================%
 % Calculate R2* map from PDw echoes
@@ -167,8 +172,8 @@ if mpm_params.basicR2s
     % create nifti object for output R2* map
     fR2s = fullfile(calcpath,[outbasename '_' mpm_params.output(mpm_params.qR2s).suffix '.nii']);
     Ni          = nifti;
-    Ni.mat      = V_pdw(1).mat;
-    Ni.mat0     = V_pdw(1).mat;
+    Ni.mat      = V_ref(1).mat;
+    Ni.mat0     = V_ref(1).mat;
     Ni.descrip  = mpm_params.output(mpm_params.qR2s).descrip{1};
     Ni.dat      = file_array(fR2s,dm,dt, 0,1,0);
     create(Ni);
@@ -181,7 +186,7 @@ if mpm_params.basicR2s
         M = spm_matrix([0 0 p 0 0 0 1 1 1]);
         Y = zeros(dm(1:2));
         for i = 1:numel(V_pdw)
-            M1 = V_pdw(i).mat\V_pdw(1).mat*M;
+            M1 = V_pdw(i).mat\V_ref(1).mat*M;
             Y  = Y + W(i)*log(max(spm_slice_vol(V_pdw(i),M1,dm(1:2),mpm_params.interp),1));
         end
         Ni.dat(:,:,p) = max(min(Y,threshall.R2s),-threshall.R2s)*1000; % threshold T2* at +/- 0.1ms or R2* at +/- 10000 *(1/sec), negative values are allowed to preserve Gaussian distribution
@@ -213,16 +218,16 @@ for ccon=1:mpm_params.ncon % loop over available contrasts
     Ni.mat      = V(1).mat;
     Ni.mat0     = V(1).mat;
     Ni.descrip  = sprintf('Averaged %sw images - %d echoes', mpm_params.input(ccon).tag, avg_nr);
-    Ni.dat      = file_array(Pavg{ccon},dm,dt,0,1,0);
+    Ni.dat      = file_array(Pavg{ccon},V(1).dim,dt,0,1,0);
     create(Ni);
-    spm_progress_bar('Init',dm(3),Ni.descrip,'planes completed');
+    spm_progress_bar('Init',V(1).dim(3),Ni.descrip,'planes completed');
     % sm = 0;
-    for p = 1:dm(3)
+    for p = 1:V(1).dim(3)
         M = spm_matrix([0 0 p]);
-        Y = zeros(dm(1:2));
+        Y = zeros(V(1).dim(1:2));
         for nr = 1:avg_nr
             M1 = V(nr).mat\V(1).mat*M;
-            Y  = Y + spm_slice_vol(V(nr),M1,dm(1:2),mpm_params.interp);
+            Y  = Y + spm_slice_vol(V(nr),M1,V(1).dim(1:2),mpm_params.interp);
         end
         Ni.dat(:,:,p) = Y/avg_nr;
         % sm = sm + sum(Y(:))/avg_nr;
@@ -247,20 +252,62 @@ if (PDwidx && T1widx)
     Ni.mat      = V(1).mat;
     Ni.mat0     = V(1).mat;
     Ni.descrip  = sprintf('Averaged T1w images for PD calculation - %d echoes',PDproc.nr_echoes_forA);
-    Ni.dat      = file_array(PT1w_forA,dm,dt, 0,1,0);
+    Ni.dat      = file_array(PT1w_forA,V(1).dim,dt, 0,1,0);
     create(Ni);
-    spm_progress_bar('Init',dm(3),Ni.descrip,'planes completed');
-    for p = 1:dm(3),
+    spm_progress_bar('Init',V(1).dim(3),Ni.descrip,'planes completed');
+    for p = 1:V(1).dim(3)
         M = spm_matrix([0 0 p]);
-        Y = zeros(dm(1:2));
-        for nr = 1:PDproc.nr_echoes_forA,
+        Y = zeros(V(1).dim(1:2));
+        for nr = 1:PDproc.nr_echoes_forA
             M1 = V(nr).mat\V(1).mat*M;
-            Y  = Y + spm_slice_vol(V(nr),M1,dm(1:2),mpm_params.interp);
+            Y  = Y + spm_slice_vol(V(nr),M1,V(1).dim(1:2),mpm_params.interp);
         end
         Ni.dat(:,:,p) = Y/PDproc.nr_echoes_forA;
         spm_progress_bar('Set',p);
     end
     spm_progress_bar('Clear');
+end
+
+% Average reference images if provided
+if ~isempty(mpm_params.ref.fnam)
+    ref_avg_nr = size(mpm_params.ref.fnam,1);
+    if ref_avg_nr > 1
+        Pref        = fullfile(calcpath,[outbasename '_ref.nii']);
+        V           = spm_vol(mpm_params.ref.fnam);
+        Ni          = nifti;
+        Ni.mat      = V(1).mat;
+        Ni.mat0     = V(1).mat;
+        Ni.descrip  = sprintf('Averaged %sw images - %d echoes', 'reference', ref_avg_nr);
+        Ni.dat      = file_array(Pref,V(1).dim(1:3),dt,0,1,0);
+        create(Ni);
+        spm_progress_bar('Init',V(1).dim(3),Ni.descrip,'planes completed');
+        % sm = 0;
+        for p = 1:V(1).dim(3)
+            M = spm_matrix([0 0 p]);
+            Y = zeros(V(1).dim(1:2));
+            for nr = 1:avg_nr
+                M1 = V(nr).mat\V(1).mat*M;
+                Y  = Y + spm_slice_vol(V(nr),M1,V(1).dim(1:2),mpm_params.interp);
+            end
+            Ni.dat(:,:,p) = Y/avg_nr;
+            % sm = sm + sum(Y(:))/avg_nr;
+            spm_progress_bar('Set',p);
+        end
+        % avg = sm/prod(dm);
+        spm_progress_bar('Clear');
+
+        input_files = mpm_params.input(ccon).fnam;
+        Output_hdr = init_mpm_output_metadata(input_files, mpm_params);
+        Output_hdr.history.output.imtype = Ni.descrip;
+        Output_hdr.history.output.units = 'a.u.';
+        set_metadata(Pavg{ccon},Output_hdr,mpm_params.json);
+    else
+        Pref = deblank(mpm_params.ref.fnam);
+    end
+    refPD = false;
+else
+    Pref  = Pavg{PDwidx};
+    refPD = true;
 end
 
 %% =======================================================================%
@@ -269,28 +316,34 @@ end
 hmri_log(sprintf('\t-------- Coregistering the images --------'),mpm_params.nopuflags);
 % NOTE: coregistration can be disabled using the hmri_def.coreg2PDw flag
 
-x_MT2PD = [0 0 0 0 0 0];
-if MTwidx; 
+x_PD2REF = [0 0 0 0 0 0];
+if PDwidx && ~refPD
     if mpm_params.coreg
-        x_MT2PD = coreg_mt(Pavg{PDwidx}, Pavg{MTwidx});
+        x_PD2REF = coreg_mt(Pref, Pavg{PDwidx});
     end
 end
-x_T12PD = [0 0 0 0 0 0];   
-if T1widx; 
+x_MT2REF = [0 0 0 0 0 0];
+if MTwidx
     if mpm_params.coreg
-        x_T12PD = coreg_mt(Pavg{PDwidx}, Pavg{T1widx});
-        coreg_mt(Pavg{PDwidx}, PT1w_forA);
+        x_MT2REF = coreg_mt(Pref, Pavg{MTwidx});
+    end
+end
+x_T12REF = [0 0 0 0 0 0];   
+if T1widx
+    if mpm_params.coreg
+        x_T12REF = coreg_mt(Pref, Pavg{T1widx});
+        coreg_mt(Pref, PT1w_forA);
     end
 end
 
 V_trans = [];
 if ~isempty(P_trans)
-    % Load B1 mapping data if available and coregister to PDw
+    % Load B1 mapping data if available and coregister to Ref
     % P_trans(1,:) = magnitude image (anatomical reference for coregistration) 
     % P_trans(2,:) = B1 map (p.u.)
-    if mpm_params.coreg
-        coreg_bias_map(Pavg{PDwidx}, P_trans);
-    end
+    % if mpm_params.coreg
+        coreg_bias_map(Pref, P_trans);
+    % end
     V_trans = spm_vol(P_trans);
 end
 
@@ -299,8 +352,9 @@ if mpm_params.QA.enable
     if exist(mpm_params.QA.fnam,'file')
         mpm_params.QA = spm_jsonread(mpm_params.QA.fnam);
     end
-    mpm_params.QA.ContrastCoreg.MT2PD = x_MT2PD;
-    mpm_params.QA.ContrastCoreg.T12PD = x_T12PD;
+    mpm_params.QA.ContrastCoreg.PD2REF = x_PD2REF;
+    mpm_params.QA.ContrastCoreg.MT2REF = x_MT2REF;
+    mpm_params.QA.ContrastCoreg.T12REF = x_T12REF;
     spm_jsonwrite(mpm_params.QA.fnam, mpm_params.QA, struct('indent','\t'));
 end
 
@@ -330,8 +384,8 @@ if mpm_params.QA.enable
             fR2sQA{ccon} = fullfile(calcpath,[outbasename '_R2s_' mpm_params.input(ccon).tag 'w.nii']);
             dt        = [spm_type('float32'),spm_platform('bigend')];
             Ni        = nifti;
-            Ni.mat    = V_pdw(1).mat;
-            Ni.mat0   = V_pdw(1).mat;
+            Ni.mat    = V_ref(1).mat;
+            Ni.mat0   = V_ref(1).mat;
             Ni.descrip='OLS R2* map [s-1]';
             Ni.dat    = file_array(fR2sQA{ccon},dm,dt, 0,1,0);
             create(Ni);
@@ -357,7 +411,7 @@ if mpm_params.QA.enable
                     % appropriate contrast using the matField entry for that
                     % contrast, which has been co-registered to the PD-weighted
                     % data:
-                    M1 = Vavg(ccon).mat\V_pdw(1).mat*M;
+                    M1 = Vavg(ccon).mat\V_ref(1).mat*M;
                     
                     % Third order B-spline interpolation for OLS R2* estimation
                     % since we no longer assume that the echoes are perfectly
@@ -419,8 +473,8 @@ if mpm_params.proc.R2sOLS && any(mpm_params.estaticsR2s)
             if mpm_params.estaticsR2s(ccon)
                 Pte0{ccon}  = fullfile(calcpath,[outbasename '_' mpm_params.input(ccon).tag 'w_OLSfit_TEzero.nii']);
                 Ni          = nifti;
-                Ni.mat      = V_pdw(1).mat;
-                Ni.mat0     = V_pdw(1).mat;
+                Ni.mat      = V_ref(1).mat;
+                Ni.mat0     = V_ref(1).mat;
                 Ni.descrip  = sprintf('OLS fit to TE=0 for %sw images - %d echoes', mpm_params.input(ccon).tag, length(mpm_params.input(ccon).TE));
                 Ni.dat      = file_array(Pte0{ccon},dm,dt,0,1,0);
                 create(Ni);
@@ -444,8 +498,8 @@ if mpm_params.proc.R2sOLS && any(mpm_params.estaticsR2s)
     
     fR2s_OLS    = fullfile(calcpath,[outbasename '_R2s_OLS' '.nii']);
     Ni          = nifti;
-    Ni.mat      = V_pdw(1).mat;
-    Ni.mat0     = V_pdw(1).mat;
+    Ni.mat      = V_ref(1).mat;
+    Ni.mat0     = V_ref(1).mat;
     Ni.descrip  = 'OLS R2* map [s-1]';
     Ni.dat      = file_array(fR2s_OLS,dm,dt,0,1,0);
     create(Ni);
@@ -486,7 +540,7 @@ if mpm_params.proc.R2sOLS && any(mpm_params.estaticsR2s)
                 % appropriate contrast using the V.mat field entry for that
                 % contrast, which has been co-registered to the PD-weighted
                 % data:
-                M1 = Vavg(ccon).mat\V_pdw(1).mat*M;
+                M1 = Vavg(ccon).mat\V_ref(1).mat*M;
                 
                 for cecho = 1:nechoes(ccon)
                     % Third order B-spline interpolation for OLS R2* estimation
@@ -554,8 +608,8 @@ Nmap    = nifti;
 for ii=1:length(mpm_params.output)-1*(~isempty(fR2s)||~isempty(fR2s_OLS)) % R2s output already done
     %dm         = V_pdw(1).dim;
     Ni         = nifti;
-    Ni.mat     = V_pdw(1).mat;
-    Ni.mat0    = V_pdw(1).mat;
+    Ni.mat     = V_ref(1).mat;
+    Ni.mat0    = V_ref(1).mat;
     Ni.descrip = mpm_params.output(ii).descrip{1};
     Ni.dat     = file_array(fullfile(calcpath,[outbasename '_' mpm_params.output(ii).suffix '.nii']),dm,dt, 0,1,0);
     create(Ni);
@@ -589,7 +643,7 @@ end
 %=========================================================================%
 hmri_log(sprintf('\t-------- Map calculation continued (R1, MTR) --------'), mpm_params.nopuflags);
 
-M0 = Ni.mat;
+M0 = V_ref(1).mat;
 
 fa_pdw_rad = fa_pdw * pi / 180;
 if MTwidx; fa_mtw_rad = fa_mtw * pi / 180; end
@@ -700,7 +754,7 @@ for p = 1:dm(3)
     end
     
     % PDw images are always available, so this bit is always loaded:
-    PDw = spm_slice_vol(Vavg(PDwidx),Vavg(PDwidx).mat\M,dm(1:2),mpm_params.interp);
+    PDw = spm_slice_vol(Vavg(PDwidx),Vavg(PDwidx).mat\V_ref(1).mat*M,dm(1:2),mpm_params.interp);
     
     % T1 map and A/PD maps can only be calculated if T1w images are
     % available:
@@ -739,7 +793,7 @@ for p = 1:dm(3)
         % for MT maps calculation, one needs MTw images on top of the T1w
         % and PDw ones...
         if MTwidx
-            MTw = spm_slice_vol(Vavg(MTwidx),Vavg(MTwidx).mat\M,dm(1:2),3);
+            MTw = spm_slice_vol(Vavg(MTwidx),Vavg(MTwidx).mat\V_ref(1).mat*M,dm(1:2),3);
             T1_forMT = ((PDw / fa_pdw_rad) - (T1w / fa_t1w_rad)) ./ ...
                 max((T1w * (fa_t1w_rad / 2 / TR_t1w)) - (PDw * fa_pdw_rad / 2 / TR_pdw),eps);
             A_forMT = T1_forMT .* (T1w * fa_t1w_rad / 2 / TR_t1w) + (T1w / fa_t1w_rad);
@@ -910,8 +964,8 @@ if PDproc.T2scorr && (~isempty(fR2s)||~isempty(fR2s_OLS))
     
     % save correction for inspection
     NiR2scorr4A         = nifti;
-    NiR2scorr4A.mat     = V_pdw(1).mat;
-    NiR2scorr4A.mat0    = V_pdw(1).mat;
+    NiR2scorr4A.mat     = V_ref(1).mat;
+    NiR2scorr4A.mat0    = V_ref(1).mat;
     NiR2scorr4A.descrip = 'R2* bias correction factor for A map (T2scorr option)';
     fR2scorr4A = spm_file(PR2s,'suffix','_corr4A');
     NiR2scorr4A.dat     = file_array(fR2scorr4A,dm,dt, 0,1,0);
@@ -920,8 +974,8 @@ if PDproc.T2scorr && (~isempty(fR2s)||~isempty(fR2s_OLS))
     
     % apply correction
     NiAcorr         = nifti;
-    NiAcorr.mat     = V_pdw(1).mat;
-    NiAcorr.mat0    = V_pdw(1).mat;
+    NiAcorr.mat     = V_ref(1).mat;
+    NiAcorr.mat0    = V_ref(1).mat;
     NiAcorr.descrip = 'R2* bias corrected A map (T2scorr option)';
     fAcorr = spm_file(fA,'suffix','_R2scorr');
     NiAcorr.dat     = file_array(fAcorr,dm,dt, 0,1,0);
@@ -1047,21 +1101,18 @@ end
 %=========================================================================%
 function [] = coreg_bias_map(P_ref, P_src)
 
-P_src(1,:);
 VG = spm_vol(P_ref);
-VF = spm_vol(P_src(1,:));
-%coregflags.sep = [2 1];
-coregflags.sep = [4 2];
-x = spm_coreg(VG,VF, coregflags);
-%x  = spm_coreg(mireg(i).VG, mireg(i).VF,flags.estimate);
-M  = inv(spm_matrix(x));
-MM = spm_get_space(deblank(VF.fname));
-spm_get_space(deblank(deblank(VF.fname)), M*MM);
-
-VF2 = spm_vol(P_src(2,:)); % now also apply transform to the map
-M  = inv(spm_matrix(x));
-MM = spm_get_space(deblank(VF2.fname));
-spm_get_space(deblank(deblank(VF2.fname)), M*MM);
+for fwhm=[21 14 7]
+    VF = spm_vol(P_src(1,:));     % Anat
+    VFmap = spm_vol(P_src(2,:));  % B1 map
+    coregflags.sep = [4 2];
+    coregflags.fwhm = [fwhm fwhm];
+    x = spm_coreg(VG,VF, coregflags);
+    M  = inv(spm_matrix(x));
+    MM = spm_get_space(deblank(VF.fname));
+    spm_get_space(deblank(deblank(VF.fname)), M*MM); 
+    spm_get_space(deblank(deblank(VFmap.fname)), M*MM); 
+end
 
 end
 
@@ -1323,6 +1374,9 @@ end
 mpm_params.nr_echoes4avg = min(length(find(mpm_params.input(1).TE<maxTEval4avg))+1,ncommonTEvals);
 hmri_log(sprintf('INFO: averaged PDw/T1w/MTw will be calculated based on the first %d echoes.',mpm_params.nr_echoes4avg),mpm_params.nopuflags);
         
+% Retrieve reference images if provided
+mpm_params.ref.fnam = char(jobsubj.ref);
+
 % if T1w and PDw data available, identify the protocol to define imperfect 
 % spoiling correction parameters (for T1 map calculation)
 ISC = hmri_get_defaults('imperfectSpoilCorr.enabled');

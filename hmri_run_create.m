@@ -122,8 +122,15 @@ P_trans = hmri_create_b1map(job.subj);
 
 % check, if RF sensitivity profile was acquired and do the recalculation
 % accordingly
-if isfield(job.subj.sensitivity,'RF_once') || isfield(job.subj.sensitivity,'RF_per_contrast')
-  job.subj = hmri_create_RFsens(job.subj);
+senstype = fieldnames(job.subj.sensitivity);
+senstype = senstype{1};
+if any(strcmpi(senstype, {'RF_once' 'RF_per_contrast'}))
+    switch job.subj.sensitivity.(senstype).mode
+        case {0 1}  % Pre-computed / Classic
+            job.subj = hmri_create_RFsens(job.subj);
+        case 2      % Barycentric
+            job.subj = hmri_create_sens_barycentre(job.subj);
+    end
 end
 
 % run hmri_create_MTProt to evaluate the parameter maps
