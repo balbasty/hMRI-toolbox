@@ -5,8 +5,8 @@ function P_trans = hmri_create_b1map(jobsubj)
 %    jobsubj - are parameters for one subject out of the job list.
 %    NB: ONE SINGLE DATA SET FROM ONE SINGLE SUBJECT IS PROCESSED HERE,
 %    LOOP OVER SUBJECTS DONE AT HIGHER LEVEL.
-%    P_trans - a vector of file names with P_trans(1,:) = anatomical volume
-%        for coregistration and P_trans(2,:) = B1 map in percent units.
+%    P_trans - a cell of vectors of file names with P_trans{c}(1,:) = anatomical volume
+%        for coregistration and P_trans{c}(2,:) = B1 map in percent units.
 %_______________________________________________________________________
 % Written by E. Balteau, 2014.
 % Cyclotron Research Centre, University of Liege, Belgium
@@ -17,6 +17,8 @@ function P_trans = hmri_create_b1map(jobsubj)
 % Chung S. et al.: "Rapid B1+ Mapping Using a Preconditioning RF Pulse with
 % TurboFLASH Readout", MRM 64:439-446 (2010).
 %_______________________________________________________________________
+% Modified by Y. Balbastre, 2020: allow different b1 maps per contrast.
+%_______________________________________________________________________
 
 flags = jobsubj.log.flags;
 flags.PopUp = false;
@@ -24,84 +26,92 @@ hmri_log(sprintf('\t============ CREATE B1 MAP - %s.m (%s) ============', mfilen
 
 % retrieve effective acquisition & processing parameters, alternatively
 % use defaults 
-b1map_params = get_b1map_params(jobsubj);
+b1map_params_all = get_b1map_params(jobsubj);
 
 % save b1map_params as json-file
-spm_jsonwrite(fullfile(jobsubj.path.supplpath,'hMRI_map_creation_b1map_params.json'),b1map_params,struct('indent','\t'));
+spm_jsonwrite(fullfile(jobsubj.path.supplpath,'hMRI_map_creation_b1map_params.json'),b1map_params_all,struct('indent','\t'));
 
-% init output
-P_trans = [];
+P_trans_all = {};
+for i=1:numel(b1map_params_all)
 
-% return if nothing else to be done (no B1 correction or UNICORT cases)
-if ~b1map_params.b1avail
-    return;
+    b1map_params = b1map_params_all(i);
+    
+    % init output
+    P_trans = [];
+
+    % return if nothing else to be done (no B1 correction or UNICORT cases)
+    if ~b1map_params.b1avail
+        return;
+    end
+
+    % calculate B1 map according to b1 data type
+    switch(b1map_params.b1type)
+        case 'i3D_AFI'
+            % processing B1 map from AFI data
+            P_trans  = calc_AFI_b1map(jobsubj, b1map_params);
+
+        case 'i3D_EPI'
+            % processing B1 map from SE/STE EPI data
+            P_trans  = calc_SESTE_b1map(jobsubj, b1map_params);
+
+        case 'tfl_b1_map'
+            % processing B1 map from tfl_b1map data
+            P_trans  = calc_tfl_b1map(jobsubj, b1map_params);
+
+        case 'rf_map'
+            % processing B1 map from rf_map data
+            P_trans  = calc_rf_map(jobsubj, b1map_params);
+
+        case 'pre_processed_B1'
+            if b1map_params.scafac ~= 1
+                % rescale if scaling factor other than 1 is provided
+                rescaled_fnam = fullfile(jobsubj.path.b1path, spm_file(spm_file(b1map_params.b1input(2,:),'suffix','_rescaled'),'filename'));
+                calcflags.descrip = sprintf('Pre-processed B1 map rescaled with factor %f', b1map_params.scafac);
+                outcalc = spm_imcalc(b1map_params.b1input(2,:),rescaled_fnam,sprintf('%f*i1',b1map_params.scafac),calcflags);
+                % set and write metadata
+                json = hmri_get_defaults('json');
+                input_files = b1map_params.b1input(2,:);
+                Output_hdr = init_b1_output_metadata(input_files, b1map_params);
+                Output_hdr.history.procstep.descrip = [Output_hdr.history.procstep.descrip ' (Rescaling)'];
+                Output_hdr.history.output.imtype = sprintf('Pre-processed B1 map rescaled with factor %f', b1map_params.scafac);
+                set_metadata(rescaled_fnam,Output_hdr,json);
+                % replace original B1 map by the rescaled one
+                b1map_params.b1input = char(b1map_params.b1input(1,:), rescaled_fnam);
+            end
+            P_trans  = b1map_params.b1input(1:2,:);
+
+        otherwise 
+            hmri_log(sprintf('WARNING: unknown B1 type, no B1 map calculation performed.'),b1map_params.defflags);
+
+    end
+
+    % copy P_trans output to Results/Supplementary directory (nii & json!) and
+    % make P_trans point to the copied files (so coregistration is applied to
+    % them).
+    %
+    % NOTES: 
+    %   - if "cleanup" set to true, the B1mapCalc directory is deleted when the
+    %   Map Calculation completes...  
+    %   - just in case no json files have been saved with the output, the
+    %   copyfile is called in "try" mode...
+    %   - must strip the ',1' (at the end of the file extension '.nii,1')
+    %   otherwise copyfile does not find the files!! 
+
+    if ~isempty(P_trans)
+        P_trans = spm_file(P_trans,'number','');
+        P_trans_copy{1} = fullfile(jobsubj.path.supplpath, spm_file(P_trans(1,:), 'filename'));
+        P_trans_copy{2} = fullfile(jobsubj.path.supplpath, spm_file(P_trans(2,:), 'filename'));    
+        copyfile(deblank(P_trans(1,:)), P_trans_copy{1});
+        try copyfile([spm_str_manip(P_trans(1,:),'r') '.json'],[spm_str_manip(P_trans_copy{1},'r') '.json']); end %#ok<*TRYNC>
+        copyfile(deblank(P_trans(2,:)), P_trans_copy{2});
+        try copyfile([spm_str_manip(P_trans(2,:),'r') '.json'],[spm_str_manip(P_trans_copy{2},'r') '.json']); end
+        P_trans = char(P_trans_copy{1},P_trans_copy{2});
+    end
+
+    P_trans_all = [P_trans_all {P_trans}];
 end
-
-% calculate B1 map according to b1 data type
-switch(b1map_params.b1type)
-    case 'i3D_AFI'
-        % processing B1 map from AFI data
-        P_trans  = calc_AFI_b1map(jobsubj, b1map_params);
-        
-    case 'i3D_EPI'
-        % processing B1 map from SE/STE EPI data
-        P_trans  = calc_SESTE_b1map(jobsubj, b1map_params);
-        
-    case 'tfl_b1_map'
-        % processing B1 map from tfl_b1map data
-        P_trans  = calc_tfl_b1map(jobsubj, b1map_params);
-        
-    case 'rf_map'
-        % processing B1 map from rf_map data
-        P_trans  = calc_rf_map(jobsubj, b1map_params);
-        
-    case 'pre_processed_B1'
-        if b1map_params.scafac ~= 1
-            % rescale if scaling factor other than 1 is provided
-            rescaled_fnam = fullfile(jobsubj.path.b1path, spm_file(spm_file(b1map_params.b1input(2,:),'suffix','_rescaled'),'filename'));
-            calcflags.descrip = sprintf('Pre-processed B1 map rescaled with factor %f', b1map_params.scafac);
-            outcalc = spm_imcalc(b1map_params.b1input(2,:),rescaled_fnam,sprintf('%f*i1',b1map_params.scafac),calcflags);
-            % set and write metadata
-            json = hmri_get_defaults('json');
-            input_files = b1map_params.b1input(2,:);
-            Output_hdr = init_b1_output_metadata(input_files, b1map_params);
-            Output_hdr.history.procstep.descrip = [Output_hdr.history.procstep.descrip ' (Rescaling)'];
-            Output_hdr.history.output.imtype = sprintf('Pre-processed B1 map rescaled with factor %f', b1map_params.scafac);
-            set_metadata(rescaled_fnam,Output_hdr,json);
-            % replace original B1 map by the rescaled one
-            b1map_params.b1input = char(b1map_params.b1input(1,:), rescaled_fnam);
-        end
-        P_trans  = b1map_params.b1input(1:2,:);
-        
-    otherwise 
-        hmri_log(sprintf('WARNING: unknown B1 type, no B1 map calculation performed.'),b1map_params.defflags);
-       
-end
-
-% copy P_trans output to Results/Supplementary directory (nii & json!) and
-% make P_trans point to the copied files (so coregistration is applied to
-% them).
-%
-% NOTES: 
-%   - if "cleanup" set to true, the B1mapCalc directory is deleted when the
-%   Map Calculation completes...  
-%   - just in case no json files have been saved with the output, the
-%   copyfile is called in "try" mode...
-%   - must strip the ',1' (at the end of the file extension '.nii,1')
-%   otherwise copyfile does not find the files!! 
-
-if ~isempty(P_trans)
-    P_trans = spm_file(P_trans,'number','');
-    P_trans_copy{1} = fullfile(jobsubj.path.supplpath, spm_file(P_trans(1,:), 'filename'));
-    P_trans_copy{2} = fullfile(jobsubj.path.supplpath, spm_file(P_trans(2,:), 'filename'));    
-    copyfile(deblank(P_trans(1,:)), P_trans_copy{1});
-    try copyfile([spm_str_manip(P_trans(1,:),'r') '.json'],[spm_str_manip(P_trans_copy{1},'r') '.json']); end %#ok<*TRYNC>
-    copyfile(deblank(P_trans(2,:)), P_trans_copy{2});
-    try copyfile([spm_str_manip(P_trans(2,:),'r') '.json'],[spm_str_manip(P_trans_copy{2},'r') '.json']); end
-    P_trans = char(P_trans_copy{1},P_trans_copy{2});
-end
-
-hmri_log(sprintf('\t============ CREATE B1 MAP: completed (%s) ============', datestr(now)),b1map_params.nopuflags);
+    
+hmri_log(sprintf('\t============ CREATE B1 MAP: completed (%s) ============', datestr(now)),b1map_params_all(1).nopuflags);
 
 end
 
@@ -151,6 +161,7 @@ spm_smooth(B1map_norm,smB1map_norm,smth);
 % smB1map_norm = smB1map_norm.*Mask;
 
 sname = spm_file(V1.fname,'filename');
+sname = [sname '_' b1map_params.contrast];
 
 % save output images
 VB1 = V1;
@@ -296,6 +307,7 @@ Output_hdr.history.output.imtype = 'SE/STE B1 mapping - Distorted B1+ map';
 Output_hdr.history.output.units = 'p.u.';
 V_save = struct('fname',V(1).fname,'dim',V(1).dim,'mat',V(1).mat,'dt',V(1).dt,'descrip','B1 map [%]');
 [~,outname,e] = fileparts(V_save.fname);
+outname = [b1map_params.contrast '_' outname];
 V_save.fname = fullfile(outpath,['B1map_' outname e]);
 V_save = spm_write_vol(V_save,Y_ab*100);
 set_metadata(V_save.fname,Output_hdr,json);
@@ -461,6 +473,7 @@ outpath = jobsubj.path.b1path;
 b1map_params.outpath = outpath;
 
 sname = spm_file(V1.fname,'basename');
+sname = [sname '_' b1map_params.contrast];
 
 VB1 = V1;
 VB1.pinfo = [max(smB1map_norm(:))/16384;0;0]; % what is this for? (TL)
@@ -520,6 +533,7 @@ outpath = jobsubj.path.b1path;
 b1map_params.outpath = outpath;
 
 sname = spm_file(V1.fname,'basename');
+sname = [sname '_' b1map_params.contrast];
 
 VB1 = V1;
 VB1.pinfo = [max(smB1map_norm(:))/16384;0;0]; % what is this for? (TL)
@@ -598,10 +612,33 @@ hmri_log(sprintf('\t------------ B1 MAP CALCULATION (%s) %s ------------',b1_pro
 [v,r] = spm('Ver');
 b1map_params.SPMver = sprintf('%s (%s)', v, r);
 
+% Get number of contrasts
+if isfield(jobsubj.b1_type.(b1_protocol),'B1_per_contrast')
+    b1_repeats = {jobsubj.b1_type.(b1_protocol).B1_per_contrast.MT
+                  jobsubj.b1_type.(b1_protocol).B1_per_contrast.PD
+                  jobsubj.b1_type.(b1_protocol).B1_per_contrast.T1};
+    contrasts = {'MT', 'PD', 'T1'};
+else
+    b1_repeats = {jobsubj.b1_type.(b1_protocol)};
+    contrasts = {'All'};
+end
+nb_b1 = numel(b1_repeats);
+
+% Compute specific parameters for each b1 map
+b1map_params = repmat(b1map_params, [nb_b1 1]);
+[b1map_params.contrast] = deal(contrasts{:});
+for i=1:nb_b1
+    b1map_params(i) = get_one_b1map_params(b1map_params(i), b1_repeats{i});
+end
+
+end %< END OF FUNCTION
+
+function b1map_params = get_one_b1map_params(b1map_params, b1_protocol, b1_repeat)
+
 % load B1 input images if any
 % (NB: if a 'b1input' field is present, it should NOT be empty)
-if isfield(jobsubj.b1_type.(b1_protocol),'b1input')
-    b1map_params.b1input = char(spm_file(jobsubj.b1_type.(b1_protocol).b1input,'number',''));        
+if isfield(b1_repeat,'b1input')
+    b1map_params.b1input = char(spm_file(b1_repeat.b1input,'number',''));   
     if isempty(b1map_params.b1input)
         hmri_log(sprintf(['WARNING: expected B1 input images missing. Switching to "no \n' ...
             '\tB1 correction" mode. If you meant to apply B1 bias correction, \n' ...
@@ -613,8 +650,9 @@ end
         
 % load B0 input images if any
 % (NB: if a 'b0input' field is present, it may be empty)
-if isfield(jobsubj.b1_type.(b1_protocol),'b0input')
-    b1map_params.b0input = char(spm_file(jobsubj.b1_type.(b1_protocol).b0input,'number',''));
+if isfield(b1_repeats,'b0input')
+    has_b0 = true;
+    b1map_params.b0input = char(spm_file(b1_repeats.binput,'number',''));  
     if isempty(b1map_params.b0input)
         % hmri_log(sprintf(['WARNING: expected B0 fieldmap not available for EPI undistortion.\n' ...
         %     '\tNo fieldmap correction will be applied.']),b1map_params.defflags);
@@ -624,7 +662,7 @@ if isfield(jobsubj.b1_type.(b1_protocol),'b0input')
             '\tcorrection without phase unwrapping. Switching to "no B1 correction" mode.\n' ...
             '\tIf you meant to apply B1 bias correction, check your data and re-run the batch.']),b1map_params.defflags);
         b1_protocol = 'no_B1_correction';
-        b1map_params = hmri_get_defaults('b1map.no_B1_correction');        
+        b1map_params = hmri_get_defaults('b1map.no_B1_correction'); 
     end
 end
 
@@ -637,9 +675,9 @@ switch b1_protocol
         hmri_log(sprintf('No B1 map available. No B1 correction applied (semi-quantitative maps only)'),b1map_params.nopuflags);
         
     case 'pre_processed_B1'
-        b1map_params.scafac = jobsubj.b1_type.(b1_protocol).scafac;
+        b1map_params.scafac = b1_repeats.scafac;
         if ~isempty(b1map_params.b1input)
-            if b1map_params.scafac == 1
+            if b1map_params.scafac
                 hmri_log(sprintf('Preprocessed B1 map available. \nAssuming it is in percent units of the nominal flip angle. \nNo calculation required.'),b1map_params.defflags);
             else
                 hmri_log(sprintf('Preprocessed B1 map available. \nScaling factor provided: %f. Assuming B1 map will be expressed \nin p.u. of the nominal flip angle after rescaling.', b1map_params.scafac),b1map_params.defflags);
@@ -747,14 +785,14 @@ switch b1_protocol
                     if isempty(tmp)
                         hmri_log(sprintf('WARNING: using defaults value for B0 mapping TEs\n(short TE=%.2fms) instead of metadata', ...
                             b1map_params.b0acq.shortTE),b1map_params.defflags);
-                    else b1map_params.b0acq.shortTE = tmp; 
+                    else, b1map_params.b0acq.shortTE = tmp; 
                     end
                     
                     tmp = get_metadata_val(b1map_params.b0input(2,:),'EchoTime');
                     if isempty(tmp)
                         hmri_log(sprintf('WARNING: using defaults value for B0 mapping TEs\n(long TE=%.2fms) instead of metadata', ...
                             b1map_params.b0acq.longTE),b1map_params.defflags);
-                    else b1map_params.b0acq.longTE = tmp; 
+                    else, b1map_params.b0acq.longTE = tmp; 
                     end
                     b1map_params.b0acq.iformat = 'PM';
                 end
@@ -773,14 +811,14 @@ switch b1_protocol
                 if isempty(tr)
                     hmri_log(sprintf('WARNING: using defaults values for TRs\n(TR ratio = %.1f) instead of metadata', ...
                         b1map_params.b1acq.TR2TR1ratio),b1map_params.defflags);
-                else b1map_params.b1acq.TR2TR1ratio = tr(2)/tr(1); 
+                else, b1map_params.b1acq.TR2TR1ratio = tr(2)/tr(1); 
                 end
                 
                 tmp = get_metadata_val(b1hdr{1},'FlipAngle');
                 if isempty(tmp)
                     hmri_log(sprintf('WARNING: using defaults value for flip ange \n(%d deg) instead of metadata', ...
                         b1map_params.b1acq.alphanom), b1map_params.defflags);
-                else b1map_params.b1acq.alphanom = tmp; 
+                else, b1map_params.b1acq.alphanom = tmp; 
                 end
             catch
                 hmri_log(sprintf(['WARNING: possibly no metadata associated to the input images. \n' ...

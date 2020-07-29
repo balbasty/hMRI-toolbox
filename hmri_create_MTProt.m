@@ -95,8 +95,8 @@ mpm_params = get_mpm_params(jobsubj);
 % and avoid number of repetitions:
 
 % B1 transmit input:
-% P_trans(1,:) = magnitude image (anatomical reference for coregistration)
-% P_trans(2,:) = B1 map (p.u.)
+% P_trans{c}(1,:) = magnitude image (anatomical reference for coregistration)
+% P_trans{c}(2,:) = B1 map (p.u.)
 P_trans = jobsubj.b1_trans_input;
 
 % index number for each contrast - zero index means no images available
@@ -336,15 +336,29 @@ if T1widx
     end
 end
 
-V_trans = [];
-if ~isempty(P_trans)
-    % Load B1 mapping data if available and coregister to Ref
-    % P_trans(1,:) = magnitude image (anatomical reference for coregistration) 
-    % P_trans(2,:) = B1 map (p.u.)
-    % if mpm_params.coreg
-        coreg_bias_map(Pref, P_trans);
-    % end
-    V_trans = spm_vol(P_trans);
+% B1 maps
+V_trans = struct('MT', [], 'PD', [], 'T1', []);
+b1_multi = true;
+contrasts = fieldnames(P_trans);
+for c=1:numel(contrasts)
+    contrast = contrasts{c};
+    if ~isempty(P_trans.(contrast))
+        % Load B1 mapping data if available and coregister to Ref
+        % P_trans(1,:) = magnitude image (anatomical reference for coregistration) 
+        % P_trans(2,:) = B1 map (p.u.)
+%         if mpm_params.coreg_b1
+            coreg_bias_map(Pref, P_trans.(contrast));
+%         end
+        vol = spm_vol(P_trans.(contrast));
+        if strcmpi(contrast, 'All')
+            V_trans.MT = vol;
+            V_trans.PD = vol;
+            V_trans.T1 = vol;
+            b1_multi = false;
+        else
+            V_trans.(contrast) = vol;
+        end
+    end
 end
 
 % parameters saved for quality assessment
@@ -658,10 +672,15 @@ for p = 1:dm(3)
     % PDw images are always available, so this bit is always loaded:
     PDw = spm_slice_vol(Vavg(PDwidx),Vavg(PDwidx).mat\M,dm(1:2),mpm_params.interp);
     
-    if ~isempty(V_trans)
-        f_T = spm_slice_vol(V_trans(2,:),V_trans(2,:).mat\M,dm(1:2),mpm_params.interp)/100; % divide by 100, since p.u. maps
+    if ~isempty(V_trans.PD)
+        f_PD = spm_slice_vol(V_trans.PD(2,:),V_trans.PD(2,:).mat\M,dm(1:2),mpm_params.interp)/100; % divide by 100, since p.u. maps
     else
-        f_T = [];
+        f_PD = [];
+    end
+    if ~isempty(V_trans.T1)
+        f_T1 = spm_slice_vol(V_trans.T1(2,:),V_trans.T1(2,:).mat\M,dm(1:2),mpm_params.interp)/100; % divide by 100, since p.u. maps
+    else
+        f_T1 = f_PD;
     end
     
     % Standard magnetization transfer ratio (MTR) in percent units [p.u.]
@@ -682,7 +701,7 @@ for p = 1:dm(3)
 
         T1w = spm_slice_vol(Vavg(T1widx),Vavg(T1widx).mat\M,dm(1:2),mpm_params.interp);
         
-        if isempty(f_T)
+        if isempty(f_PD)
             % semi-quantitative T1
             R1 = (((T1w * (fa_t1w_rad / 2 / TR_t1w)) - (PDw * fa_pdw_rad / 2 / TR_pdw)) ./ ...
                 max(((PDw / fa_pdw_rad) - (T1w / fa_t1w_rad)),eps))*10^6;
@@ -691,20 +710,32 @@ for p = 1:dm(3)
             % correct T1 for transmit bias f_T with fa_true = f_T * fa_nom
             % T1corr = T1 / f_T / f_T
             
+            true_fa_pdw_rad = fa_pdw_rad * f_PD;
+            true_fa_t1w_rad = fa_t1w_rad * f_T1;
+                
             if ISC.enabled
                 % MFC: We do have P2_a and P2_b parameters for this sequence
                 % => T1 = A(B1) + B(B1)*T1app (see Preibisch 2009)
+                if b1_multi
+                    hmri_log(sprintf([ ...
+                        'WARNING: The model for imperfect spoiling correction ' ...
+                        '\nassumes that B1 is identical across contrasts. ' ...
+                        'This is not the case when multiple B1 maps are used. ' ...
+                        '\nThe correction uses the PD B1 map instead.']), ...
+                        mpm_params.nopuflags);
+                end
+                f_T = f_PD;
                 T1 = ISC.P2_a(1)*f_T.^2 + ...
                     ISC.P2_a(2)*f_T + ...
                     ISC.P2_a(3) + ...
                     (ISC.P2_b(1)*f_T.^2+ISC.P2_b(2)*f_T+ISC.P2_b(3)) .* ...
-                    ((((PDw / fa_pdw_rad) - (T1w / fa_t1w_rad)+eps) ./ ...
-                    max((T1w * fa_t1w_rad / 2 / TR_t1w) - (PDw * fa_pdw_rad / 2 / TR_pdw),eps))./f_T.^2);
+                    ((((PDw ./ true_fa_pdw_rad) - (T1w ./ fa_t1w_rad)+eps) ./ ...
+                    max((T1w .* fa_t1w_rad / 2 / TR_t1w) - (PDw .* true_fa_pdw_rad / 2 / TR_pdw),eps)));
             else
                 % MFC: We do not have P2_a or P2_b parameters for this sequence
                 % => T1 = T1app
-                T1 = ((((PDw / fa_pdw_rad) - (T1w / fa_t1w_rad)+eps) ./ ...
-                    max((T1w * fa_t1w_rad / 2 / TR_t1w) - (PDw * fa_pdw_rad / 2 / TR_pdw),eps))./f_T.^2);
+                T1 = ((((PDw ./ true_fa_pdw_rad) - (T1w ./ true_fa_t1w_rad)+eps) ./ ...
+                    max((T1w .* true_fa_t1w_rad / 2 / TR_t1w) - (PDw .* true_fa_pdw_rad / 2 / TR_pdw),eps)));
             end
             
             R1 = 1./T1*10^6;
@@ -745,12 +776,23 @@ spm_progress_bar('Init',dm(3),'Calculating maps (continued)','planes completed')
 for p = 1:dm(3)
     M = M0*spm_matrix([0 0 p]);
 
-    if ~isempty(V_trans)
-        f_T = spm_slice_vol(V_trans(2,:),V_trans(2,:).mat\M,dm(1:2),mpm_params.interp)/100; % divide by 100, since p.u. maps
+    
+    if ~isempty(V_trans.PD)
+        f_PD = spm_slice_vol(V_trans.PD(2,:),V_trans.PD(2,:).mat\M,dm(1:2),mpm_params.interp)/100; % divide by 100, since p.u. maps
     elseif ~isempty(V_trans_unicort)
-        f_T = spm_slice_vol(V_trans_unicort(1,:),V_trans_unicort(1,:).mat\M,dm(1:2),mpm_params.interp)/100; % divide by 100, since p.u. maps        
+        f_PD = spm_slice_vol(V_trans_unicort(1,:),V_trans_unicort(1,:).mat\M,dm(1:2),mpm_params.interp)/100; % divide by 100, since p.u. maps        
     else
-        f_T = [];
+        f_PD = [];
+    end
+    if ~isempty(V_trans.T1)
+        f_T1 = spm_slice_vol(V_trans.T1(2,:),V_trans.T1(2,:).mat\M,dm(1:2),mpm_params.interp)/100; % divide by 100, since p.u. maps
+    else
+        f_T1 = f_PD;
+    end
+    if ~isempty(V_trans.MT)
+        f_MT = spm_slice_vol(V_trans.T1(2,:),V_trans.T1(2,:).mat\M,dm(1:2),mpm_params.interp)/100; % divide by 100, since p.u. maps
+    else
+        f_MT = f_PD;
     end
     
     % PDw images are always available, so this bit is always loaded:
@@ -778,8 +820,9 @@ for p = 1:dm(3)
         % UNICORT!) or
         % - f_T has been calculated using UNICORT *AND* the UNICORT.PD flag
         % is enabled (advanced user only! method not validated yet!)
-        if(~isempty(f_T))&&(~mpm_params.UNICORT.R1 || mpm_params.UNICORT.PD)
-            A = T1 .* (T1w_forA .*(fa_t1w_rad*f_T) / 2 / TR_t1w) + (T1w_forA ./ (fa_t1w_rad*f_T));
+        if(~isempty(f_T1))&&(~mpm_params.UNICORT.R1 || mpm_params.UNICORT.PD)
+            true_fa_t1w_rad = fa_t1w_rad * f_T1;
+            A = T1 .* (T1w_forA .* true_fa_t1w_rad / 2 / TR_t1w) + (T1w_forA ./ true_fa_t1w_rad);
         else
             % semi-quantitative A
             A = T1 .* (T1w_forA * fa_t1w_rad / 2 / TR_t1w) + (T1w_forA / fa_t1w_rad);
@@ -793,20 +836,50 @@ for p = 1:dm(3)
         % for MT maps calculation, one needs MTw images on top of the T1w
         % and PDw ones...
         if MTwidx
-            MTw = spm_slice_vol(Vavg(MTwidx),Vavg(MTwidx).mat\V_ref(1).mat*M,dm(1:2),3);
-            T1_forMT = ((PDw / fa_pdw_rad) - (T1w / fa_t1w_rad)) ./ ...
-                max((T1w * (fa_t1w_rad / 2 / TR_t1w)) - (PDw * fa_pdw_rad / 2 / TR_pdw),eps);
-            A_forMT = T1_forMT .* (T1w * fa_t1w_rad / 2 / TR_t1w) + (T1w / fa_t1w_rad);
-            
-            % MT in [p.u.]; offset by - famt * famt / 2 * 100 where MT_w = 0 (outside mask)
-            MT       = ( (A_forMT * fa_mtw_rad - MTw) ./ (MTw+eps) ./ (T1_forMT + eps) * TR_mtw - fa_mtw_rad^2 / 2 ) * 100;
-            % f_T correction is applied either if:
-            % - f_T has been provided as separate B1 mapping measurement (not
-            % UNICORT!) or
-            % - f_T has been calculated using UNICORT *AND* the UNICORT.MT flag
-            % is enabled (advanced user only! method not validated yet!)
-            if (~isempty(f_T))&&(~mpm_params.UNICORT.R1 || mpm_params.UNICORT.MT)
-                MT = MT .* (1 - 0.4) ./ (1 - 0.4 * f_T);
+            if ~b1_multi
+                MTw = spm_slice_vol(Vavg(MTwidx),Vavg(MTwidx).mat\V_ref(1).mat*M,dm(1:2),3);
+                % Apparent (uncorrected for B1) T1
+                T1_forMT = ((PDw ./ fa_pdw_rad) - (T1w ./ fa_t1w_rad)) ./ ...
+                    max((T1w .* fa_t1w_rad / 2 / TR_t1w) - (PDw .* fa_pdw_rad / 2 / TR_pdw),eps);
+                % Apparent (uncorrected for B1) A
+                A_forMT  = T1_forMT .* (T1w .* fa_t1w_rad / 2 / TR_t1w) + (T1w ./ fa_t1w_rad);
+
+                % MT in [p.u.]; offset by - famt * famt / 2 * 100 where MT_w = 0 (outside mask)
+                MT       = ( (A_forMT .* fa_mtw_rad - MTw) ./ (MTw+eps) ./ (T1_forMT + eps) * TR_mtw - fa_mtw_rad.^2 / 2 ) * 100;
+                % f_T correction is applied either if:
+                % - f_T has been provided as separate B1 mapping measurement (not
+                % UNICORT!) or
+                % - f_T has been calculated using UNICORT *AND* the UNICORT.MT flag
+                % is enabled (advanced user only! method not validated yet!)
+                if (~isempty(f_T))&&(~mpm_params.UNICORT.R1 || mpm_params.UNICORT.MT)
+                    MT = MT .* (1 - 0.4) ./ (1 - 0.4 * f_T);
+                end
+            else
+                % Specific B1 map for each volume. Some of the
+                % simplifications from the single B1 case do not hold
+                % anymore.
+                true_fa_pdw_rad = fa_pdw_rad * f_PD;
+                true_fa_t1w_rad = fa_t1w_rad * f_T1;
+                true_fa_mtw_rad = fa_mtw_rad * f_MT;
+                % Exact (corrected for B1) T1
+                T1_forMT = ((PDw ./ true_fa_pdw_rad) - (T1w ./ true_fa_t1w_rad)) ./ ...
+                    max((T1w .* true_fa_t1w_rad / 2 / TR_t1w) - (PDw .* true_fa_pdw_rad / 2 / TR_pdw),eps);
+                % Exact (corrected for B1) A
+                A_forMT  = T1_forMT .* (T1w .* true_fa_t1w_rad / 2 / TR_t1w) + (T1w ./ true_fa_t1w_rad);
+                
+                % MT in [p.u.]; offset by - famt * famt / 2 * 100 where MT_w = 0 (outside mask)
+                MT       = ( (A_forMT .* true_fa_mtw_rad - MTw) ./ (MTw+eps) ./ (T1_forMT + eps) * TR_mtw - true_fa_mtw_rad.^2 / 2 ) * 100;
+                
+                % Correction for non-nominal flip angle of the off-resonance pulse.
+                %   Helms, "Correction for residual effects of B1+ 
+                %   inhomogeniety on MT saturation in FLASH-based multi- 
+                %   parameter mapping of the brain.", Proc. ISMRM 2015
+                %   http://archive.ismrm.org/2015/3360.html
+                % Note that the value used here (0.4) only works for a
+                % specific pulse chape and nominal flip angle (220 deg).
+                MT = MT .* (1 - 0.4) ./ (1 - 0.4 * f_MT) ./ (f_MT.^2);
+                
+                
             end
             
             tmp      = MT;

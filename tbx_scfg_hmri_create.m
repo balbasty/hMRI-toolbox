@@ -289,7 +289,9 @@ end
 function x = b1_single(input, varargin)
     x = input('B1_once', 'Single', varargin{:});
 end
-function x = b1_multi(input, varargin)
+function x = b1_multi(input, param)
+    if nargin < 2 || isempty(param), param = {}; 
+    else,                            param = {param}; end
     input_MT  = input('MT');
     input_PD  = input('PD');
     input_T1  = input('T1');
@@ -298,7 +300,7 @@ function x = b1_multi(input, varargin)
     x.name    = 'Per contrast';
     x.help    = {['One set of RF sensitivity maps is acquired for each contrast ' ...
         'i.e. for each of the PD-, T1- and MT-weighted multi-echo FLASH acquisitions.']};
-    x.val     = {input_MT input_PD input_T1 param};
+    x.val     = [{input_MT input_PD input_T1} param];
 end
 function x = b1_choice(tag, name, input, varargin)
     single    = b1_single(input, varargin{:});
@@ -310,7 +312,7 @@ function x = b1_choice(tag, name, input, varargin)
         'You can select either:'
         '- Single: based on a single set of B1 maps for all contrasts,'
         '- Per contrast: based on one set of B1 maps acquired for each contrast.'};
-    x.values  = {single multi};hmri_create_MTProt.m
+    x.values  = {single multi};
     x.val     = {single};
 end
 b1_choice_3DEPI   = b1_choice('i3D_EPI',          '3D EPI',           @b1_input_3DEPI, b1parameters);
