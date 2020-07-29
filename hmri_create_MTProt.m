@@ -95,8 +95,8 @@ mpm_params = get_mpm_params(jobsubj);
 % and avoid number of repetitions:
 
 % B1 transmit input:
-% P_trans{c}(1,:) = magnitude image (anatomical reference for coregistration)
-% P_trans{c}(2,:) = B1 map (p.u.)
+% P_trans.(c)(1,:) = magnitude image (anatomical reference for coregistration)
+% P_trans.(c)(2,:) = B1 map (p.u.)
 P_trans = jobsubj.b1_trans_input;
 
 % index number for each contrast - zero index means no images available
@@ -1061,7 +1061,7 @@ if PDproc.T2scorr && (~isempty(fR2s)||~isempty(fR2s_OLS))
 end
 
 % PD map calculation continued
-if ~isempty(f_T) && (mpm_params.UNICORT.PD || ~mpm_params.UNICORT.R1)
+if ~isempty(f_PD) && (mpm_params.UNICORT.PD || ~mpm_params.UNICORT.R1)
     % if calibration enabled, do the Unified Segmentation bias correction
     % if required and calibrate the PD map
     if PDproc.calibr

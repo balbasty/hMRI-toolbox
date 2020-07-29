@@ -5,8 +5,9 @@ function P_trans = hmri_create_b1map(jobsubj)
 %    jobsubj - are parameters for one subject out of the job list.
 %    NB: ONE SINGLE DATA SET FROM ONE SINGLE SUBJECT IS PROCESSED HERE,
 %    LOOP OVER SUBJECTS DONE AT HIGHER LEVEL.
-%    P_trans - a cell of vectors of file names with P_trans{c}(1,:) = anatomical volume
-%        for coregistration and P_trans{c}(2,:) = B1 map in percent units.
+%    P_trans - a struct of vectors of file names with 
+%        P_trans.(contrast)(1,:) = anatomical volume  for coregistration and 
+%        P_trans.(contrast)(2,:) = B1 map in percent units.
 %_______________________________________________________________________
 % Written by E. Balteau, 2014.
 % Cyclotron Research Centre, University of Liege, Belgium
@@ -31,17 +32,17 @@ b1map_params_all = get_b1map_params(jobsubj);
 % save b1map_params as json-file
 spm_jsonwrite(fullfile(jobsubj.path.supplpath,'hMRI_map_creation_b1map_params.json'),b1map_params_all,struct('indent','\t'));
 
-P_trans_all = {};
+P_trans_all = struct;
 for i=1:numel(b1map_params_all)
 
-    b1map_params = b1map_params_all(i);
+    b1map_params = b1map_params_all{i};
     
     % init output
     P_trans = [];
 
     % return if nothing else to be done (no B1 correction or UNICORT cases)
     if ~b1map_params.b1avail
-        return;
+        continue;
     end
 
     % calculate B1 map according to b1 data type
@@ -108,10 +109,11 @@ for i=1:numel(b1map_params_all)
         P_trans = char(P_trans_copy{1},P_trans_copy{2});
     end
 
-    P_trans_all = [P_trans_all {P_trans}];
+    P_trans_all.(b1map_params.contrast) = P_trans;
 end
+P_trans = P_trans_all;
     
-hmri_log(sprintf('\t============ CREATE B1 MAP: completed (%s) ============', datestr(now)),b1map_params_all(1).nopuflags);
+hmri_log(sprintf('\t============ CREATE B1 MAP: completed (%s) ============', datestr(now)),b1map_params_all{1}.nopuflags);
 
 end
 
@@ -572,6 +574,8 @@ function b1map_params = get_b1map_params(jobsubj)
 % (can be different - a variation of - the b1 type)
 f = fieldnames(jobsubj.b1_type);
 b1_protocol = f{1};
+f = fieldnames(jobsubj.b1_type.(b1_protocol));
+single_or_multi = f{1};
 
 % pre-set filename of defaults file
 deffnam = '';
@@ -580,7 +584,7 @@ custom_def = false;
 % load customized defaults parameters from customized defaults file if any
 % (the customized defaults file must be run to overwrite the standard
 % defaults parameters)
-if isfield(jobsubj.b1_type.(b1_protocol),'b1parameters')
+if isfield(jobsubj.b1_type.(b1_protocol).(single_or_multi),'b1parameters')
     % first reinitialise processing parameters to standard defaults:
     hmri_b1_standard_defaults;
     deffnam = fullfile(fileparts(mfilename('fullpath')),'config','hmri_b1_standard_defaults.m');
@@ -588,52 +592,60 @@ if isfield(jobsubj.b1_type.(b1_protocol),'b1parameters')
 
     % then, if customized defaults file available, run it to overwrite
     % standard defaults parameters.
-    if isfield(jobsubj.b1_type.(b1_protocol).b1parameters,'b1defaults')
-        deffnam = jobsubj.b1_type.(b1_protocol).b1parameters.b1defaults;
+    if isfield(jobsubj.b1_type.(b1_protocol).(single_or_multi).b1parameters,'b1defaults')
+        deffnam = jobsubj.b1_type.(b1_protocol).(single_or_multi).b1parameters.b1defaults;
         spm('Run',deffnam);
         custom_def = true;
     end
 end
 
-% load all B1 bias correction defaults parameters & add default file
-b1map_params = hmri_get_defaults(['b1map.' b1_protocol]); 
-b1map_params.defaults_file = deffnam;
-b1map_params.custom_defaults = custom_def;
+% Helper function to initialize the parameter structure
+function b1map_params = init_param(b1_protocol, contrast)
+    % load all B1 bias correction defaults parameters & add default file
+    b1map_params = hmri_get_defaults(['b1map.' b1_protocol]); 
+    b1map_params.defaults_file = deffnam;
+    b1map_params.custom_defaults = custom_def;
 
-% flags for logging information and warnings
-b1map_params.defflags = jobsubj.log.flags; % default flags
-b1map_params.nopuflags = jobsubj.log.flags; % force no Pop-Up
-b1map_params.nopuflags.PopUp = false; 
+    % flags for logging information and warnings
+    b1map_params.defflags = jobsubj.log.flags; % default flags
+    b1map_params.nopuflags = jobsubj.log.flags; % force no Pop-Up
+    b1map_params.nopuflags.PopUp = false; 
+    
+    % save SPM version (slight differences may appear in the results depending
+    % on the SPM version!)
+    [v,r] = spm('Ver');
+    b1map_params.SPMver = sprintf('%s (%s)', v, r);
+    
+    % Contrast
+    b1map_params.contrast = contrast;
+end
 
-hmri_log(sprintf('\t------------ B1 MAP CALCULATION (%s) %s ------------',b1_protocol, datestr(now)),b1map_params.nopuflags);
-
-% save SPM version (slight differences may appear in the results depending
-% on the SPM version!)
-[v,r] = spm('Ver');
-b1map_params.SPMver = sprintf('%s (%s)', v, r);
+hmri_log(sprintf('\t------------ B1 MAP CALCULATION (%s) %s ------------',b1_protocol, datestr(now)),jobsubj.log.flags);
 
 % Get number of contrasts
-if isfield(jobsubj.b1_type.(b1_protocol),'B1_per_contrast')
+if strcmpi(single_or_multi, 'B1_per_contrast')
     b1_repeats = {jobsubj.b1_type.(b1_protocol).B1_per_contrast.MT
                   jobsubj.b1_type.(b1_protocol).B1_per_contrast.PD
                   jobsubj.b1_type.(b1_protocol).B1_per_contrast.T1};
     contrasts = {'MT', 'PD', 'T1'};
 else
-    b1_repeats = {jobsubj.b1_type.(b1_protocol)};
+    b1_repeats = {jobsubj.b1_type.(b1_protocol).B1_once};
     contrasts = {'All'};
 end
 nb_b1 = numel(b1_repeats);
 
 % Compute specific parameters for each b1 map
-b1map_params = repmat(b1map_params, [nb_b1 1]);
-[b1map_params.contrast] = deal(contrasts{:});
+b1map_params = cell(1, nb_b1);
 for i=1:nb_b1
-    b1map_params(i) = get_one_b1map_params(b1map_params(i), b1_repeats{i});
+    hmri_log(sprintf('\tFor contrast: %s',contrasts{i}),jobsubj.log.flags);
+    b1map_params{i} = get_one_b1map_params(b1_protocol, contrasts{i}, b1_repeats{i}, @init_param);
 end
 
-end %< END OF FUNCTION
+end
+% -------------------------------------------------------------------------
+function b1map_params = get_one_b1map_params(b1_protocol, contrast, b1_repeat, init_param)
 
-function b1map_params = get_one_b1map_params(b1map_params, b1_protocol, b1_repeat)
+b1map_params = init_param(b1_protocol, contrast);
 
 % load B1 input images if any
 % (NB: if a 'b1input' field is present, it should NOT be empty)
@@ -644,15 +656,16 @@ if isfield(b1_repeat,'b1input')
             '\tB1 correction" mode. If you meant to apply B1 bias correction, \n' ...
             '\tcheck your data and re-run the batch.']),b1map_params.defflags);
         b1_protocol = 'no_B1_correction';
-        b1map_params = hmri_get_defaults('b1map.no_B1_correction'); 
+        b1map_params = init_param('no_B1_correction', contrast); 
+        return
     end
 end
         
 % load B0 input images if any
 % (NB: if a 'b0input' field is present, it may be empty)
-if isfield(b1_repeats,'b0input')
+if isfield(b1_repeat,'b0input')
     has_b0 = true;
-    b1map_params.b0input = char(spm_file(b1_repeats.binput,'number',''));  
+    b1map_params.b0input = char(spm_file(b1_repeat.b0input,'number',''));  
     if isempty(b1map_params.b0input)
         % hmri_log(sprintf(['WARNING: expected B0 fieldmap not available for EPI undistortion.\n' ...
         %     '\tNo fieldmap correction will be applied.']),b1map_params.defflags);
@@ -662,7 +675,8 @@ if isfield(b1_repeats,'b0input')
             '\tcorrection without phase unwrapping. Switching to "no B1 correction" mode.\n' ...
             '\tIf you meant to apply B1 bias correction, check your data and re-run the batch.']),b1map_params.defflags);
         b1_protocol = 'no_B1_correction';
-        b1map_params = hmri_get_defaults('b1map.no_B1_correction'); 
+        b1map_params = init_param('no_B1_correction', contrast); 
+        return
     end
 end
 

@@ -142,7 +142,7 @@ b1raw.name     = 'B1 input';
 b1raw.help     = {'Select B1 input images according to the type of B1 bias correction.'};
 b1raw.filter   = 'image';
 b1raw.ufilter  = '.*';
-b1raw.num      = [2 30];
+b1raw.num      = [0 30]; % [2 30]
 % b1raw.val      = {''};
 
 % ---------------------------------------------------------------------
@@ -156,7 +156,7 @@ b0raw.help     = {'Select B0 field map input images.' ...
     'Select both magnitude images and the presubtracted phase image, in that order.'};
 b0raw.filter   = 'image';
 b0raw.ufilter  = '.*';
-b0raw.num      = [3 3];
+b0raw.num      = [0 3]; % [3 3]
 % b0raw.num      = [0 3];
 % b0raw.val      = {''};
 
