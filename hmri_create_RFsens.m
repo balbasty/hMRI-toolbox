@@ -138,8 +138,8 @@ rfsens_params.SPMver = sprintf('%s (%s)', v, r);
 
 % Precomputed maps?
 rfsens_params.precomputed = ...
-       (isfield(jobsubj.sensitivity, 'RF_once') && jobsubj.sensitivity.RF_once.sens_precomp) ...
-    || (isfield(jobsubj.sensitivity, 'RF_per_contrast') && jobsubj.sensitivity.RF_per_contrast.sens_precomp);
+       (isfield(jobsubj.sensitivity, 'RF_once') && jobsubj.sensitivity.RF_once.mode == 0) ...
+    || (isfield(jobsubj.sensitivity, 'RF_per_contrast') && jobsubj.sensitivity.RF_per_contrast.mode == 0);
 
 % Input structurals: determine which contrasts are available
 ccon = 0;
