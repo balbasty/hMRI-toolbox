@@ -689,7 +689,7 @@ switch b1_protocol
         hmri_log(sprintf('No B1 map available. No B1 correction applied (semi-quantitative maps only)'),b1map_params.nopuflags);
         
     case 'pre_processed_B1'
-        b1map_params.scafac = b1_repeats.scafac;
+        b1map_params.scafac = b1_repeat.scafac;
         if ~isempty(b1map_params.b1input)
             if b1map_params.scafac
                 hmri_log(sprintf('Preprocessed B1 map available. \nAssuming it is in percent units of the nominal flip angle. \nNo calculation required.'),b1map_params.defflags);
