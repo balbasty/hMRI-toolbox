@@ -319,20 +319,20 @@ hmri_log(sprintf('\t-------- Coregistering the images --------'),mpm_params.nopu
 x_PD2REF = [0 0 0 0 0 0];
 if PDwidx && ~refPD
     if mpm_params.coreg
-        x_PD2REF = coreg_mt(Pref, Pavg{PDwidx});
+        x_PD2REF = coreg_mt(Pref, Pavg{PDwidx}, mpm_params.coreg_flags);
     end
 end
 x_MT2REF = [0 0 0 0 0 0];
 if MTwidx
     if mpm_params.coreg
-        x_MT2REF = coreg_mt(Pref, Pavg{MTwidx});
+        x_MT2REF = coreg_mt(Pref, Pavg{MTwidx}, mpm_params.coreg_flags);
     end
 end
 x_T12REF = [0 0 0 0 0 0];   
 if T1widx
     if mpm_params.coreg
-        x_T12REF = coreg_mt(Pref, Pavg{T1widx});
-        coreg_mt(Pref, PT1w_forA);
+        x_T12REF = coreg_mt(Pref, Pavg{T1widx}, mpm_params.coreg_flags);
+        coreg_mt(Pref, PT1w_forA, mpm_params.coreg_flags);
     end
 end
 
@@ -346,9 +346,7 @@ for c=1:numel(contrasts)
         % Load B1 mapping data if available and coregister to Ref
         % P_trans(1,:) = magnitude image (anatomical reference for coregistration) 
         % P_trans(2,:) = B1 map (p.u.)
-%         if mpm_params.coreg_b1
-            coreg_bias_map(Pref, P_trans.(contrast));
-%         end
+        coreg_bias_map(Pref, P_trans.(contrast), mpm_params.coreg_bias_flags);
         vol = spm_vol(P_trans.(contrast));
         if strcmpi(contrast, 'All')
             V_trans.MT = vol;
@@ -1061,7 +1059,7 @@ if PDproc.T2scorr && (~isempty(fR2s)||~isempty(fR2s_OLS))
 end
 
 % PD map calculation continued
-if ~isempty(f_PD) && (mpm_params.UNICORT.PD || ~mpm_params.UNICORT.R1)
+if ~isempty(f_PD) && ~isempty(fA) && exist('fTPM','var') && (mpm_params.UNICORT.PD || ~mpm_params.UNICORT.R1)
     % if calibration enabled, do the Unified Segmentation bias correction
     % if required and calibrate the PD map
     if PDproc.calibr
@@ -1152,10 +1150,11 @@ end
 %% =======================================================================%
 % To coregister the structural images for MT protocol 
 %=========================================================================%
-function [x] = coreg_mt(P_ref, P_src)
+function [x] = coreg_mt(P_ref, P_src, coreg_flags)
 
 for src_nr = 1:size(P_src,1)
     VG = spm_vol(P_ref);
+if false  % Yael's multi-scale version
     for fwhm=[21 14 7]
         VF = spm_vol(P_src(src_nr,:));
         coregflags.sep = [4 2];
@@ -1165,6 +1164,13 @@ for src_nr = 1:size(P_src,1)
         MM = spm_get_space(deblank(VF.fname));
         spm_get_space(deblank(deblank(VF.fname)), M*MM); %#ok<*MINV>
     end
+else
+    VF = spm_vol(P_src(src_nr,:));
+    x = spm_coreg(VG,VF,coreg_flags);
+    M  = inv(spm_matrix(x));
+    MM = spm_get_space(deblank(VF.fname));
+    spm_get_space(deblank(deblank(VF.fname)), M*MM); %#ok<*MINV>
+end
 end
 end
 
@@ -1172,19 +1178,32 @@ end
 % To coregister the B1 or receive maps with the anatomical images in the
 % MT protocol. 
 %=========================================================================%
-function [] = coreg_bias_map(P_ref, P_src)
+function [] = coreg_bias_map(P_ref, P_src, coreg_bias_flags)
 
 VG = spm_vol(P_ref);
-for fwhm=[21 14 7]
-    VF = spm_vol(P_src(1,:));     % Anat
-    VFmap = spm_vol(P_src(2,:));  % B1 map
-    coregflags.sep = [4 2];
-    coregflags.fwhm = [fwhm fwhm];
-    x = spm_coreg(VG,VF, coregflags);
+if false  % Yael's multi-scale version
+    for fwhm=[21 14 7]
+        VF = spm_vol(P_src(1,:));     % Anat
+        VFmap = spm_vol(P_src(2,:));  % B1 map
+        coregflags.sep = [4 2];
+        coregflags.fwhm = [fwhm fwhm];
+        x = spm_coreg(VG,VF, coregflags);
+        M  = inv(spm_matrix(x));
+        MM = spm_get_space(deblank(VF.fname));
+        spm_get_space(deblank(deblank(VF.fname)), M*MM); 
+        spm_get_space(deblank(deblank(VFmap.fname)), M*MM); 
+    end
+else
+    VF = spm_vol(P_src(1,:));
+    x = spm_coreg(VG,VF,coreg_bias_flags);
     M  = inv(spm_matrix(x));
     MM = spm_get_space(deblank(VF.fname));
-    spm_get_space(deblank(deblank(VF.fname)), M*MM); 
-    spm_get_space(deblank(deblank(VFmap.fname)), M*MM); 
+    spm_get_space(deblank(deblank(VF.fname)), M*MM);
+
+    VF2 = spm_vol(P_src(2,:)); % now also apply transform to the map
+    M  = inv(spm_matrix(x));
+    MM = spm_get_space(deblank(VF2.fname));
+    spm_get_space(deblank(deblank(VF2.fname)), M*MM);
 end
 
 end
@@ -1219,27 +1238,23 @@ spm_write_vol(V_maskedA,maskedA);
 
 % Bias-field correction of masked A map
 % use unified segmentation with uniform defaults across the toolbox:
-if isfield(mpm_params.proc.RFsenscorr,'RF_us')
-    job_bfcorr = hmri_get_defaults('segment');
-    job_bfcorr.channel.vols = {V_maskedA.fname};
-    job_bfcorr.channel.biasreg = PDproc.biasreg;
-    job_bfcorr.channel.biasfwhm = PDproc.biasfwhm;
-    job_bfcorr.channel.write = [1 0]; % need the BiasField, obviously!
-    for ctis=1:length(job_bfcorr.tissue)
-        job_bfcorr.tissue(ctis).native = [0 0]; % no need to write c* volumes
-    end
-    output_list = spm_preproc_run(job_bfcorr);
-    
-    % Bias field correction of A map.
-    % Bias field calculation is based on the masked A map, while correction
-    % must be applied to the unmasked A map. The BiasField is therefore
-    % retrieved from previous step and applied onto the original A map.
-    BFfnam = output_list.channel.biasfield{1};
-    BF = double(spm_read_vols(spm_vol(BFfnam)));
-    Y = BF.*spm_read_vols(spm_vol(fA));
-else
-    Y = spm_read_vols(spm_vol(fA));
+job_bfcorr = hmri_get_defaults('segment');
+job_bfcorr.channel.vols = {V_maskedA.fname};
+job_bfcorr.channel.biasreg = PDproc.biasreg;
+job_bfcorr.channel.biasfwhm = PDproc.biasfwhm;
+job_bfcorr.channel.write = [1 0]; % need the BiasField, obviously!
+for ctis=1:length(job_bfcorr.tissue)
+    job_bfcorr.tissue(ctis).native = [0 0]; % no need to write c* volumes
 end
+output_list = spm_preproc_run(job_bfcorr);
+
+% Bias field correction of A map.
+% Bias field calculation is based on the masked A map, while correction
+% must be applied to the unmasked A map. The BiasField is therefore
+% retrieved from previous step and applied onto the original A map.
+BFfnam = output_list.channel.biasfield{1};
+BF = double(spm_read_vols(spm_vol(BFfnam)));
+Y = BF.*spm_read_vols(spm_vol(fA));
 
 % Calibration of flattened A map to % water content using typical white
 % matter value from the litterature (69%)
@@ -1575,6 +1590,16 @@ end
 
 % coregistration of all images to the PDw average (or TE=0 fit):
 mpm_params.coreg = hmri_get_defaults('coreg2PDw');
+
+% coregistration flags for weighted images
+mpm_params.coreg_flags = hmri_get_defaults('coreg_flags');
+hmri_log(sprintf('=== Registration Settings for weighted images ==='),mpm_params.nopuflags);
+hmri_log(sprintf('Method: %s, Sampling: %s, Smoothing: %s', mpm_params.coreg_flags.cost_fun, mat2str(mpm_params.coreg_flags.sep), mat2str(mpm_params.coreg_flags.fwhm)),mpm_params.nopuflags);
+
+% coregistration flags for B1 to PDw
+mpm_params.coreg_bias_flags = hmri_get_defaults('coreg_bias_flags');
+hmri_log(sprintf('=== Registration Settings for B1 bias images ==='),mpm_params.nopuflags);
+hmri_log(sprintf('Method: %s, Sampling: %s, Smoothing: %s', mpm_params.coreg_bias_flags.cost_fun, mat2str(mpm_params.coreg_bias_flags.sep), mat2str(mpm_params.coreg_bias_flags.fwhm)),mpm_params.nopuflags);
 
 % Prepare output for R1, PD, MT and R2* maps
 RFsenscorr = fieldnames(mpm_params.proc.RFsenscorr);
